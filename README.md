@@ -1,61 +1,43 @@
-# CONPLANOS – Herramientas GNSS V4
+# CONPLANOS - Herramientas GNSS V5
 
-Aplicación Streamlit para dos flujos:
+## Herramientas
+1. Corrector GNSS
+2. Generador de data
+3. Certificado de punto geodésico
 
-1. **Corrector GNSS**: toma un CSV nativo de campo y lo corrige usando un informe de procesamiento Leica o coordenadas introducidas manualmente.
-2. **Generador de data derivada**: toma un CSV nativo matriz y un archivo CSV/Excel con coordenadas E/N de plano, conserva los puntos coincidentes y genera puntos nuevos con altura interpolada y atributos de referencia del punto nativo más cercano.
+## Cambio importante V5
+La comparación de antenas entre CSV y PDF ya **no se marca como error** automáticamente.
+La aplicación muestra por separado la antena de referencia y la antena móvil, porque que sean distintas puede ser completamente normal.
 
-## Qué hace el Corrector GNSS
+## Certificado de punto geodésico
+La herramienta acepta:
+- Informe Leica para extraer automáticamente Norte, Este, Zona, Latitud, Longitud, Altura Elipsoidal, estación GNSS y fecha de posicionamiento.
+- O ingreso manual de todos los campos.
 
-- identifica la base de la primera fila de datos;
-- verifica bases diferentes o faltantes;
-- identifica puntos Fijo/no Fijo;
-- resume antena y altura de antena y sus repeticiones;
-- lee el informe Leica y extrae referencia, punto procesado, solución, duración, distancia, antena, altura, fecha y CQ;
-- compara H ortométrica y H elipsoidal con la H del CSV;
-- genera `CORREGIDA.csv` y `POLIGONO.csv`.
+Genera:
+- PDF de una página con el diseño base del certificado proporcionado.
+- Word editable basado en la plantilla proporcionada.
 
-## Qué hace el Generador de data derivada
+La fecha de emisión se completa con la fecha actual y puede editarse antes de generar.
 
-- acepta CSV o Excel de coordenadas E/N;
-- permite definir tolerancia de coincidencia;
-- si el punto del plano coincide con uno nativo, conserva la fila nativa;
-- si es nuevo, conserva E/N del plano;
-- interpola H con IDW usando los vecinos nativos más cercanos;
-- toma el Código del punto nativo más cercano;
-- toma Base, antena, PDO(PDOP), solución y demás campos como referencia del punto nativo más cercano;
-- usa `Número de Observación = 65` para puntos nuevos;
-- muestra un resumen de cuántos puntos coincidieron y cuántos fueron generados.
+Si no se proporciona una foto de la placa, se genera una **ilustración** de placa con el código. Debe entenderse como un gráfico generado, no como una fotografía de una placa real.
 
-> El Generador produce **data derivada/interpolada**. No debe confundirse con mediciones originales de campo ni utilizarse para alterar o reemplazar evidencia de observación sin una justificación técnica documentada.
+El certificado mantiene la leyenda del formato proporcionado indicando que no constituye certificación oficial del IGN.
 
-## Versiones
+## Publicación en Streamlit
+Subir al repositorio:
+- app.py
+- core.py
+- certificate.py
+- requirements.txt
+- README.md
+- .gitignore
+- .streamlit/config.toml
+- templates/certificado_punto_geodesico_template.docx
+- templates/certificate_background.png
+- templates/logo_ls.png
 
-- **V1**: corrección automática desde CSV + coordenadas.
-- **V2**: lectura de informe Leica, selección de altura y controles.
-- **V3**: interfaz compacta con resúmenes laterales.
-- **V4**: guía integrada + pestaña Generador de data derivada.
+Main file: app.py
 
-## Archivos para GitHub
-
-```text
-app.py
-core.py
-requirements.txt
-README.md
-.gitignore
-.streamlit/config.toml
-```
-
-## Ejecutar localmente
-
-```bash
-py -m pip install -r requirements.txt
-streamlit run app.py
-```
-
-## Streamlit Community Cloud
-
-Repositorio GitHub → branch `main` → archivo principal `app.py`.
-
-No subir PDFs/CSV de clientes, credenciales NTRIP, contraseñas ni proyectos Leica al repositorio.
+## Nota de privacidad
+No subir PDFs/CSV de clientes ni credenciales al repositorio.

@@ -62,6 +62,10 @@ class ReportInfo:
 
     reference_antenna_height_m: Optional[float] = None
     mobile_antenna_height_m: Optional[float] = None
+    mobile_lat: Optional[str] = None
+    mobile_lon: Optional[str] = None
+    utm_zone: Optional[str] = None
+    point_code: Optional[str] = None
 
     raw_pdf_names: list[str] | None = None
     detected_baselines: list[str] | None = None
@@ -369,6 +373,28 @@ def parse_report_pdfs(pdf_items) -> ReportInfo:
     if len(heights) >= 2:
         info.reference_antenna_height_m = heights[0]
         info.mobile_antenna_height_m = heights[1]
+
+    # Additional fields used by the point certificate.
+    lat = _first_nonempty_after(lines, "Latitud WGS84:")
+    lon = _first_nonempty_after(lines, "Longitud WGS84:")
+    if lat:
+        # The line contains reference then mobile; use the second value.
+        parts = re.split(r"\s{2,}", lat)
+        info.mobile_lat = parts[-1] if parts else lat
+    if lon:
+        parts = re.split(r"\s{2,}", lon)
+        info.mobile_lon = parts[-1] if parts else lon
+
+    # Coordinate system can be split across several PDF text lines, so inspect
+    # the full report text rather than requiring the label on one line.
+    m = re.search(r"WGS84_UTM_(\d{1,2})S", text, re.I)
+    if m:
+        info.utm_zone = m.group(1)
+
+    # Report code if present in a certificate-like report.
+    pc = regex(r"(?:C[oó]digo del punto geod[eé]sico|C[oó]digo del punto)\s*:?\s*([A-Za-z0-9_-]+)")
+    if pc:
+        info.point_code = pc
 
     return info
 

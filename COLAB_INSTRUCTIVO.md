@@ -1,23 +1,25 @@
-# CONPLANOS GNSS V4 – Google Colab
+# Google Colab - CONPLANOS V5
 
-La V4 incorpora el **Generador de data derivada** además del Corrector GNSS.
+Para probar V5 en Colab:
 
-## Corrector
+```python
+!pip -q install streamlit>=1.40,<2 PyMuPDF>=1.24,<2 openpyxl>=3.1,<4 python-docx>=1.1,<2 reportlab>=4.0,<5 Pillow>=10,<12
+```
 
-Sube CSV nativo → informe Leica o coordenadas manuales → revisa las alertas → genera CORREGIDA y POLIGONO.
+Después copia o sube al entorno los archivos del paquete:
+- app.py
+- core.py
+- certificate.py
+- templates/
+- requirements.txt
 
-## Generador
+Y ejecuta:
 
-Sube:
+```python
+!streamlit run /content/app.py --server.headless true --server.port 8501 > /content/streamlit.log 2>&1 &
+!npx --yes localtunnel --port 8501
+```
 
-1. CSV nativo matriz.
-2. CSV o Excel con coordenadas E/N del plano.
+Abre la URL temporal `https://xxxxx.loca.lt` que aparezca.
 
-Configura:
-
-- tolerancia para considerar una coordenada coincidente;
-- número de vecinos para interpolar H.
-
-El sistema conserva las filas coincidentes. Para puntos nuevos mantiene E/N del plano, interpola H por IDW y toma el Código y demás atributos del punto nativo más cercano.
-
-El resultado se identifica como **data derivada**.
+En V5 el certificado PDF se genera directamente con ReportLab para no depender de LibreOffice en Streamlit Cloud.
