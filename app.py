@@ -455,148 +455,185 @@ else:
     st.subheader("📜 Certificado de punto geodésico")
     show_help("Certificado de punto geodésico")
 
-    left, right = st.columns([2.0, 1.1], gap="large")
+    left, right = st.columns([2.0, 1.05], gap="large")
 
     defaults = today_defaults()
+
     with left:
         st.markdown('<div class="step">PASO 1</div>', unsafe_allow_html=True)
-        st.subheader("Origen de los datos")
-        source_mode = st.radio(
-            "¿De dónde tomaremos las coordenadas?",
-            ["📄 Extraer del informe Leica", "✍️ Ingresar todo manualmente"],
-            horizontal=True,
-            key="cert_source_v5",
+        st.subheader("Sube el informe de procesamiento Leica")
+
+        report_file = st.file_uploader(
+            "Informe de Procesamiento GNSS",
+            type=["pdf"],
+            key="certificate_pdf_v6",
+            help="El certificado toma los datos técnicos del PUNTO MÓVIL del informe Leica.",
         )
 
         report = None
         data = CertificateData(**defaults.__dict__)
 
-        if source_mode == "📄 Extraer del informe Leica":
-            report_file = st.file_uploader(
-                "Informe de Procesamiento GNSS",
-                type=["pdf"],
-                key="certificate_pdf_v5",
+        if not report_file:
+            st.info(
+                "Sube el informe de procesamiento. El sistema usará exclusivamente "
+                "las coordenadas y datos técnicos del punto móvil."
             )
-            if report_file:
-                try:
-                    report = parse_report_pdfs([(report_file.name, report_file.getvalue())])
-                    data = extract_certificate_data(report, defaults)
-                    st.success("✅ Datos del informe extraídos. Puedes editarlos antes de generar.")
-                except Exception as exc:
-                    st.error(f"No se pudo extraer el informe: {exc}")
-                    st.stop()
-            else:
-                st.info("Sube el informe; también puedes cambiar a modo manual.")
-        else:
-            st.info("En modo manual, todos los campos deben completarse.")
+            st.stop()
+
+        try:
+            report = parse_report_pdfs([(report_file.name, report_file.getvalue())])
+            data = extract_certificate_data(report, defaults)
+        except Exception as exc:
+            st.error(f"No se pudo extraer el informe Leica: {exc}")
+            st.stop()
+
+        # Validate the fields that must come from the mobile solution.
+        missing_from_report = []
+        for label, value in [
+            ("Norte", data.norte),
+            ("Este", data.este),
+            ("Latitud", data.latitud),
+            ("Longitud", data.longitud),
+            ("Alt. elipsoidal", data.alt_ellipsoidal),
+            ("Estación GNSS", data.estacion_gnss),
+            ("Fecha de posicionamiento", data.fecha_posicion),
+            ("Zona", data.zona),
+        ]:
+            if not str(value).strip():
+                missing_from_report.append(label)
+
+        if missing_from_report:
+            st.error(
+                "El informe no permitió extraer automáticamente: "
+                + ", ".join(missing_from_report)
+                + "."
+            )
+            st.stop()
+
+        st.success("✅ Datos técnicos del punto móvil extraídos automáticamente.")
+
+        # Compact technical read-only summary.
+        st.markdown('<div class="step">DATOS EXTRAÍDOS AUTOMÁTICAMENTE</div>', unsafe_allow_html=True)
+
+        a1, a2, a3 = st.columns(3)
+        a1.metric("Norte", f"{data.norte} m")
+        a2.metric("Este", f"{data.este} m")
+        a3.metric("Zona", data.zona)
+
+        b1, b2, b3 = st.columns(3)
+        b1.metric("Latitud", data.latitud)
+        b2.metric("Longitud", data.longitud)
+        b3.metric("Alt. elipsoidal", f"{data.alt_ellipsoidal} m")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Estación GNSS", data.estacion_gnss)
+        c2.metric("Fecha posición", data.fecha_posicion)
+        c3.metric("Año", data.anio)
+
+        st.caption(
+            "Estos datos provienen del PUNTO MÓVIL del informe Leica; no se usa la coordenada de la estación de referencia para el certificado."
+        )
 
         st.markdown('<div class="step">PASO 2</div>', unsafe_allow_html=True)
-        st.subheader("Datos del certificado")
+        st.subheader("Completa los datos que no aparecen en el informe")
 
-        c1, c2 = st.columns(2)
-        data.codigo = c1.text_input("Código del punto geodésico", value=data.codigo, key="cert_codigo_v5")
-        data.solicitante = c2.text_input("Solicitante", value=data.solicitante, key="cert_solicitante_v5")
+        data.codigo = st.text_input(
+            "Código del punto geodésico *",
+            value="",
+            key="cert_codigo_v6",
+            placeholder="Ejemplo: PG2625",
+            help="Obligatorio. Este código debe ser proporcionado por el responsable del proyecto.",
+        )
+        data.solicitante = st.text_input(
+            "Solicitante *",
+            value="",
+            key="cert_solicitante_v6",
+            placeholder="Nombre del propietario o solicitante",
+            help="Obligatorio. No se toma del PDF de procesamiento.",
+        )
 
-        c1, c2 = st.columns(2)
-        data.norte = c1.text_input("Norte", value=data.norte, key="cert_norte_v5")
-        data.este = c2.text_input("Este", value=data.este, key="cert_este_v5")
-
-        c1, c2 = st.columns(2)
-        data.zona = c1.text_input("Zona", value=data.zona, key="cert_zona_v5")
-        data.alt_ellipsoidal = c2.text_input("Alt. elipsoidal", value=data.alt_ellipsoidal, key="cert_alt_v5")
-
-        c1, c2 = st.columns(2)
-        data.latitud = c1.text_input("Latitud WGS84", value=data.latitud, key="cert_lat_v5")
-        data.longitud = c2.text_input("Longitud WGS84", value=data.longitud, key="cert_lon_v5")
-
-        c1, c2 = st.columns(2)
-        data.estacion_gnss = c1.text_input("Estación GNSS", value=data.estacion_gnss, key="cert_station_v5")
-        data.tipo_orden = c2.text_input("Tipo de orden", value=data.tipo_orden, key="cert_order_v5")
-
-        c1, c2 = st.columns(2)
-        data.fecha_posicion = c1.text_input("Fecha de posicionamiento", value=data.fecha_posicion, key="cert_posdate_v5")
-        data.correlativo = c2.text_input("Núm. correlativo", value=data.correlativo, key="cert_corr_v5")
-
-        c1, c2 = st.columns(2)
-        data.lugar_emision = c1.text_input("Lugar de emisión", value=data.lugar_emision, key="cert_place_v5")
-        data.fecha_emision = c2.text_input("Fecha de emisión", value=data.fecha_emision, key="cert_issue_date_v5")
-
-        c1, c2 = st.columns(2)
-        data.anio = c1.text_input("Año", value=data.anio, key="cert_year_v5")
-        c2.caption("La fecha de emisión se completa con la fecha actual por defecto y puedes modificarla.")
+        st.caption("⚠️ El código del punto y el solicitante son los únicos datos que debes ingresar manualmente.")
 
         st.markdown('<div class="step">PASO 3</div>', unsafe_allow_html=True)
         st.subheader("Imagen del punto geodésico")
+
         image_file = st.file_uploader(
-            "Foto de placa o punto geodésico (opcional)",
+            "Fotografía de la placa o punto geodésico (opcional)",
             type=["png", "jpg", "jpeg"],
-            key="certificate_img_v5",
+            key="certificate_img_v6",
         )
 
-        if not image_file:
-            st.caption("Si no subes una foto, se generará automáticamente una placa gráfica con el código.")
+        if image_file:
+            st.success("✅ Se utilizará la fotografía proporcionada.")
         else:
-            st.success("✅ Foto cargada.")
+            st.info(
+                "No se cargó fotografía. Se generará una ilustración de placa con el código del punto."
+            )
 
         st.markdown('<div class="step">PASO 4</div>', unsafe_allow_html=True)
-        generate = st.button("📜 GENERAR CERTIFICADO PDF + WORD", type="primary", use_container_width=True)
+        generate = st.button(
+            "📜 GENERAR CERTIFICADO PDF + WORD",
+            type="primary",
+            use_container_width=True,
+        )
 
     with right:
         card(
-            "📝 Qué genera",
-            "PDF de una página con el mismo diseño base del certificado proporcionado.<br>"
-            "Word editable basado en la plantilla original.<br>"
-            "La fecha de emisión se completa con la fecha actual por defecto."
+            "📄 Informe Leica",
+            f"Archivo: {report_file.name}<br>"
+            f"Referencia: <b>{report.reference_name or '—'}</b><br>"
+            f"Punto móvil: <b>{report.mobile_name or '—'}</b><br>"
+            f"Solución: <b>{report.solution_type or '—'}</b><br>"
+            f"Lectura: <b>{report.duration or '—'}</b>"
         )
         card(
-            "📌 Datos que se extraen del informe",
-            "Norte · Este · Zona · Latitud · Longitud · Alt. elipsoidal · Estación GNSS · Fecha de posicionamiento."
+            "📌 Datos automáticos",
+            "Norte · Este · Zona · Latitud · Longitud · Alt. elipsoidal · "
+            "Estación GNSS · Fecha de posicionamiento · Año"
         )
         card(
-            "✍️ Editable antes de generar",
-            "Código · Solicitante · Tipo de orden · Correlativo · Lugar · Fecha de emisión · Año y cualquier coordenada."
+            "✍️ Datos manuales obligatorios",
+            "<b>Código del punto geodésico</b><br>"
+            "<b>Solicitante</b>"
+        )
+        card(
+            "📅 Fecha de emisión",
+            f"Se genera automáticamente con la fecha actual: <b>{data.fecha_emision}</b>."
         )
 
-        if report:
+        if report.mobile_receiver or report.mobile_antenna:
             card(
-                "📄 Estado del informe",
-                f"Referencia: {report.reference_name or '—'}<br>"
-                f"Solución: {report.solution_type or '—'}<br>"
-                f"Fecha lectura: {report.start or '—'}"
+                "📡 Equipo del punto móvil",
+                f"Receptor: {report.mobile_receiver or '—'}<br>"
+                f"Antena: {report.mobile_antenna or '—'}<br>"
+                f"Altura: {report.mobile_antenna_height_m or '—'} m"
             )
 
     if generate:
-        # Validate basics.
-        required = {
-            "Código": data.codigo,
-            "Solicitante": data.solicitante,
-            "Norte": data.norte,
-            "Este": data.este,
-            "Zona": data.zona,
-            "Latitud": data.latitud,
-            "Longitud": data.longitud,
-            "Alt. elipsoidal": data.alt_ellipsoidal,
-            "Estación GNSS": data.estacion_gnss,
-            "Fecha de posicionamiento": data.fecha_posicion,
-            "Fecha de emisión": data.fecha_emision,
-            "Lugar de emisión": data.lugar_emision,
-            "Año": data.anio,
-        }
-        missing = [k for k,v in required.items() if not str(v).strip()]
-        if missing:
-            st.error("Completa estos campos: " + ", ".join(missing))
+        if not data.codigo.strip() or not data.solicitante.strip():
+            st.error("⚠️ Debes ingresar el Código del punto geodésico y el Solicitante.")
             st.stop()
+
+        # Use fixed certificate metadata from the provided reference template.
+        # These fields are not claimed to come from the GNSS report.
+        if not data.tipo_orden:
+            data.tipo_orden = "C"
+
+        if not data.correlativo:
+            data.correlativo = f"CP-{data.anio}-{data.codigo.strip().upper()}"
 
         tmpdir = Path(tempfile.mkdtemp(prefix="conplanos_cert_"))
         try:
             if image_file:
                 image_path = tmpdir / "punto.png"
                 image_path.write_bytes(image_file.getvalue())
+                image_note = "Fotografía proporcionada por el usuario."
             else:
                 image_path = make_plaque(data.codigo, tmpdir / "placa_generada.png")
+                image_note = "Ilustración generada automáticamente; no es una fotografía de campo."
 
-            docx_path = tmpdir / f"Certificado_{data.codigo}.docx"
-            pdf_path = tmpdir / f"Certificado_{data.codigo}.pdf"
+            docx_path = tmpdir / f"Certificado_{data.codigo.strip()}.docx"
+            pdf_path = tmpdir / f"Certificado_{data.codigo.strip()}.pdf"
 
             generate_certificate_docx(
                 data,
@@ -607,14 +644,15 @@ else:
             generate_certificate_pdf(
                 data,
                 image_path,
-                TEMPLATES_DIR / "certificate_background.png",
-                TEMPLATES_DIR / "logo_ls.png",
+                TEMPLATES_DIR / "certificate_template.pdf",
                 pdf_path,
             )
 
             st.success("✅ Certificado generado correctamente.")
-            c1, c2 = st.columns(2)
-            with c1:
+            st.caption(image_note)
+
+            d1, d2 = st.columns(2)
+            with d1:
                 st.download_button(
                     "⬇️ Descargar PDF",
                     pdf_path.read_bytes(),
@@ -622,7 +660,7 @@ else:
                     mime="application/pdf",
                     use_container_width=True,
                 )
-            with c2:
+            with d2:
                 st.download_button(
                     "⬇️ Descargar Word",
                     docx_path.read_bytes(),
@@ -630,5 +668,7 @@ else:
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
                 )
+
+            
         except Exception as exc:
             st.error(f"No se pudo generar el certificado: {exc}")

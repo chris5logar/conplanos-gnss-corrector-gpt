@@ -41,3 +41,24 @@ Main file: app.py
 
 ## Nota de privacidad
 No subir PDFs/CSV de clientes ni credenciales al repositorio.
+
+
+### V6 - Certificado de punto geodésico
+El certificado trabaja únicamente a partir del informe Leica de procesamiento del punto móvil.
+El usuario debe ingresar manualmente solo:
+- Código del punto geodésico.
+- Solicitante.
+
+El sistema extrae automáticamente del informe:
+- Norte
+- Este
+- Zona
+- Latitud
+- Longitud
+- Altura elipsoidal
+- Estación GNSS de referencia
+- Fecha de posicionamiento
+- Año
+
+La fecha de emisión se completa con la fecha actual.
+La foto de placa es opcional; si falta, se genera una ilustración de placa con el código.

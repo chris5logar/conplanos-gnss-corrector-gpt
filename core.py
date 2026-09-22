@@ -375,15 +375,23 @@ def parse_report_pdfs(pdf_items) -> ReportInfo:
         info.mobile_antenna_height_m = heights[1]
 
     # Additional fields used by the point certificate.
-    lat = _first_nonempty_after(lines, "Latitud WGS84:")
-    lon = _first_nonempty_after(lines, "Longitud WGS84:")
-    if lat:
-        # The line contains reference then mobile; use the second value.
-        parts = re.split(r"\s{2,}", lat)
-        info.mobile_lat = parts[-1] if parts else lat
-    if lon:
-        parts = re.split(r"\s{2,}", lon)
-        info.mobile_lon = parts[-1] if parts else lon
+    # Leica Infinity places the reference value and mobile value on
+    # consecutive PDF text lines. We explicitly select the SECOND value.
+    def _second_line_after_label(label: str) -> Optional[str]:
+        label_norm = _clean_line(label).casefold()
+        for i, line in enumerate(lines):
+            if _clean_line(line).casefold().startswith(label_norm):
+                vals = []
+                for candidate in lines[i + 1 : i + 5]:
+                    c = _clean_line(candidate)
+                    if c:
+                        vals.append(c)
+                    if len(vals) >= 2:
+                        return vals[1]
+        return None
+
+    info.mobile_lat = _second_line_after_label("Latitud WGS84:")
+    info.mobile_lon = _second_line_after_label("Longitud WGS84:")
 
     # Coordinate system can be split across several PDF text lines, so inspect
     # the full report text rather than requiring the label on one line.
@@ -391,7 +399,8 @@ def parse_report_pdfs(pdf_items) -> ReportInfo:
     if m:
         info.utm_zone = m.group(1)
 
-    # Report code if present in a certificate-like report.
+    # A normal Leica processing report may not contain the final project
+    # point code; the certificate UI therefore requests it manually.
     pc = regex(r"(?:C[oó]digo del punto geod[eé]sico|C[oó]digo del punto)\s*:?\s*([A-Za-z0-9_-]+)")
     if pc:
         info.point_code = pc
