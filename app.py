@@ -48,7 +48,7 @@ from certificate import (
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 LOGO_PATH = TEMPLATES_DIR / "logo_conplanos.png"
-VERSION = "9"
+VERSION = "9.1"
 
 st.set_page_config(
     page_title="CONPLANOS GNSS",
@@ -247,7 +247,7 @@ with st.sidebar:
     with st.expander("Versiones", expanded=False):
         st.markdown(
             """
-            **V9 · Placa oficial CONPLANOS como respaldo + código y año dinámicos en la placa del certificado.**
+            **V9.1 · Corrección de arranque + placa oficial CONPLANOS como respaldo + código y año dinámicos.**
 
             **V8 · Múltiples archivos + descargas persistentes + lectura inteligente E/N + TIN de alturas + visor WGS84/Google Maps + login Google.**
 

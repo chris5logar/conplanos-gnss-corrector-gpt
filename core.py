@@ -669,6 +669,16 @@ def corrected_filename(original_name: str) -> str:
     return f"{stem}{p.suffix or '.csv'}"
 
 
+def generated_data_filename(original_name: str) -> str:
+    """Return a stable filename for a generated data CSV."""
+    p = Path(original_name)
+    stem = p.stem
+    # Avoid accumulating the suffix when the name is regenerated.
+    if not re.search(r"DATA\s+GENERADA$", stem, flags=re.I):
+        stem = f"{stem} DATA GENERADA"
+    return f"{stem}{p.suffix or '.csv'}"
+
+
 def polygon_filename(original_name: str) -> str:
     p = Path(original_name)
     return f"{p.stem} POLIGONO{p.suffix or '.csv'}"

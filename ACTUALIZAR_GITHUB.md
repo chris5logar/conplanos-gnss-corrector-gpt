@@ -1,3 +1,7 @@
+## V9.1 — corrección de arranque
+
+Se corrigió un error de importación en `core.py` que impedía iniciar la app en Streamlit Cloud. Reemplaza `app.py` y `core.py` por los de esta versión.
+
 # Actualizar CONPLANOS GNSS sin cambiar nombres
 
 La V9 mantiene los nombres principales de los archivos. Para las próximas versiones, reemplaza los archivos indicados por CONPLANOS y mantén el resto del proyecto.

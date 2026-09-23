@@ -1,3 +1,7 @@
+## V9.1 — corrección de arranque
+
+Se corrigió un error de importación en `core.py` que impedía iniciar la app en Streamlit Cloud. Reemplaza `app.py` y `core.py` por los de esta versión.
+
 # CONPLANOS GNSS
 
 Aplicación Streamlit para apoyo al procesamiento y gestión de datos GNSS de CONPLANOS.
