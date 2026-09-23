@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import tempfile
 import os
@@ -20,6 +20,9 @@ from core import (
     read_coordinate_points,
     read_csv,
 )
+
+from ephemeris import find_products, group_by_day
+from history import configured as history_configured, append_point, load_points, make_record, dms_to_decimal
 
 from certificate import (
     CertificateData,
@@ -94,10 +97,15 @@ def show_help(tool):
             "Genera DATA DERIVADA para control o preparación. No representa una medición original "
             "de campo ni debe presentarse como observación GNSS real."
         )
+    elif tool == "Certificados":
+        st.info(
+            "Genera certificados de punto geodésico a partir del punto MÓVIL del informe Leica y permite "
+            "consultar el historial y mapa de puntos certificados."
+        )
     else:
         st.info(
-            "Genera un certificado de punto geodésico en Word y PDF usando el formato de referencia "
-            "proporcionado. Los datos pueden extraerse del informe Leica o ingresarse manualmente."
+            "Busca efemérides finales precisas para el día anterior, el día de observación y el día siguiente. "
+            "Prioriza ESA 5 min e IGS Final 15 min y muestra otras opciones disponibles."
         )
 
 
@@ -107,7 +115,7 @@ with st.sidebar:
     st.markdown("## 🧭 CONPLANOS GNSS")
     tool = st.radio(
         "Herramienta",
-        ["Corrector GNSS", "Generador de data", "Certificado de punto geodésico"],
+        ["Corrector GNSS", "Generador de data", "Certificados", "Efemérides precisas"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -127,11 +135,15 @@ with st.sidebar:
 
             **V4** · Generador de data derivada.
 
-            **V5** · Menú profesional + certificado de punto geodésico.
+            **V5** · Menú profesional + certificado.
+
+            **V6** · Punto móvil Leica + extracción automática.
+
+            **V7** · Efemérides + historial Google Sheets + mapa.
             """
         )
 
-    st.caption("CONPLANOS GNSS · versión 5")
+    st.caption("CONPLANOS GNSS · versión 7")
 
 # ------------------ Encabezado ------------------
 
@@ -168,6 +180,12 @@ if tool == "Corrector GNSS":
                     f"Registros: <b>{len(csv_info.rows)}</b><br>"
                     f"Base detectada: <b>{csv_info.base_name}</b><br>"
                     f"Fijo: <b>{len(csv_info.fixed_points)}</b> · No Fijo: <b>{len(csv_info.non_fixed_points)}</b>"
+                )
+                st.markdown(
+                    f'<div class="card" style="border:2px solid #0f766e;background:#f0fdfa;">'
+                    f'<div class="card-title">📍 COORDENADAS DE LA BASE DE LA DATA NATIVA</div>'
+                    f'<div class="small"><b>E:</b> {csv_info.base_original_e:.4f} m &nbsp; <b>N:</b> {csv_info.base_original_n:.4f} m &nbsp; <b>H:</b> {csv_info.base_original_h:.4f} m</div></div>',
+                    unsafe_allow_html=True,
                 )
                 if csv_info.different_base_points:
                     status(f"🔴 Hay {len(csv_info.different_base_points)} punto(s) con base diferente.", "bad")
@@ -277,14 +295,17 @@ if tool == "Corrector GNSS":
                     processed_h = height_choice["selected_h"]
 
                     with right:
-                        st.markdown("**📏 Altura usada**")
-                        card(
-                            "Comparación de altura",
+                        st.markdown(
+                            f'<div class="card" style="border:2px solid #2563eb;background:#eff6ff;">'
+                            f'<div class="card-title">📍 COORDENADAS DEL PUNTO MÓVIL PROCESADO</div>'
+                            f'<div class="small"><b>E:</b> {processed_e:.4f} m &nbsp; <b>N:</b> {processed_n:.4f} m &nbsp; <b>H:</b> {processed_h:.4f} m</div></div>',
+                            unsafe_allow_html=True,
+                        )
+                        card("📏 Altura usada",
                             f"H CSV base: {csv_info.base_original_h:.4f} m<br>"
                             f"Ortométrica: {report.mobile_h_ortho:.4f} m · Δ {height_choice['diffs'].get('Ortométrica', float('nan')):.4f} m<br>"
                             f"Elipsoidal: {report.mobile_h_ellip:.4f} m · Δ {height_choice['diffs'].get('Elipsoidal WGS84', float('nan')):.4f} m<br>"
-                            f"<b>Usada: {height_choice['selected_type']} · {processed_h:.4f} m</b>"
-                        )
+                            f"<b>Usada: {height_choice['selected_type']} · {processed_h:.4f} m</b>")
                         for w in height_choice["warnings"]:
                             status("🟡 " + w, "warn")
 
@@ -300,14 +321,16 @@ if tool == "Corrector GNSS":
                 st.markdown('<div class="step">PASO 2</div>', unsafe_allow_html=True)
                 st.subheader("Ingresa las coordenadas corregidas manualmente")
                 m1, m2, m3 = st.columns(3)
-                processed_e = m1.number_input("Este E", value=float(csv_info.base_original_e), format="%.4f", key="manual_e_v5")
-                processed_n = m2.number_input("Norte N", value=float(csv_info.base_original_n), format="%.4f", key="manual_n_v5")
-                processed_h = m3.number_input("Altura H", value=float(csv_info.base_original_h), format="%.4f", key="manual_h_v5")
+                processed_e = m1.number_input("Este E", value=float(csv_info.base_original_e), format="%.4f", key="manual_e_v7")
+                processed_n = m2.number_input("Norte N", value=float(csv_info.base_original_n), format="%.4f", key="manual_n_v7")
+                processed_h = m3.number_input("Altura H", value=float(csv_info.base_original_h), format="%.4f", key="manual_h_v7")
 
                 with right:
-                    card(
-                        "✍️ Corrección manual",
-                        f"Base: <b>{csv_info.base_name}</b><br>E: {processed_e:.4f}<br>N: {processed_n:.4f}<br>H: {processed_h:.4f}"
+                    st.markdown(
+                        f'<div class="card" style="border:2px solid #2563eb;background:#eff6ff;">'
+                        f'<div class="card-title">📍 COORDENADAS DE CORRECCIÓN</div>'
+                        f'<div class="small"><b>E:</b> {processed_e:.4f} m &nbsp; <b>N:</b> {processed_n:.4f} m &nbsp; <b>H:</b> {processed_h:.4f} m</div></div>',
+                        unsafe_allow_html=True,
                     )
 
             if processed_e is not None and processed_n is not None and processed_h is not None:
@@ -448,227 +471,169 @@ elif tool == "Generador de data":
         else:
             st.info("Sube la data nativa matriz para comenzar.")
 
-else:
+elif tool == "Certificados":
     # ========================================================
-    # Certificado de punto geodésico
+    # Certificados: generar + historial/mapa
     # ========================================================
-    st.subheader("📜 Certificado de punto geodésico")
-    show_help("Certificado de punto geodésico")
+    st.subheader("📜 Certificados de punto geodésico")
+    tab_gen, tab_hist = st.tabs(["📜 Generar certificado", "🗺️ Historial y mapa"])
 
-    left, right = st.columns([2.0, 1.05], gap="large")
-
-    defaults = today_defaults()
-
-    with left:
-        st.markdown('<div class="step">PASO 1</div>', unsafe_allow_html=True)
-        st.subheader("Sube el informe de procesamiento Leica")
-
-        report_file = st.file_uploader(
-            "Informe de Procesamiento GNSS",
-            type=["pdf"],
-            key="certificate_pdf_v6",
-            help="El certificado toma los datos técnicos del PUNTO MÓVIL del informe Leica.",
-        )
-
-        report = None
-        data = CertificateData(**defaults.__dict__)
-
-        if not report_file:
-            st.info(
-                "Sube el informe de procesamiento. El sistema usará exclusivamente "
-                "las coordenadas y datos técnicos del punto móvil."
+    with tab_gen:
+        left, right = st.columns([2.0, 1.05], gap="large")
+        defaults = today_defaults()
+        with left:
+            st.markdown('<div class="step">PASO 1</div>', unsafe_allow_html=True)
+            st.subheader("Sube el informe de procesamiento Leica")
+            report_file = st.file_uploader(
+                "Informe de Procesamiento GNSS", type=["pdf"], key="certificate_pdf_v7",
+                help="El certificado usa los datos del PUNTO MÓVIL del informe Leica."
             )
-            st.stop()
-
-        try:
-            report = parse_report_pdfs([(report_file.name, report_file.getvalue())])
-            data = extract_certificate_data(report, defaults)
-        except Exception as exc:
-            st.error(f"No se pudo extraer el informe Leica: {exc}")
-            st.stop()
-
-        # Validate the fields that must come from the mobile solution.
-        missing_from_report = []
-        for label, value in [
-            ("Norte", data.norte),
-            ("Este", data.este),
-            ("Latitud", data.latitud),
-            ("Longitud", data.longitud),
-            ("Alt. elipsoidal", data.alt_ellipsoidal),
-            ("Estación GNSS", data.estacion_gnss),
-            ("Fecha de posicionamiento", data.fecha_posicion),
-            ("Zona", data.zona),
-        ]:
-            if not str(value).strip():
-                missing_from_report.append(label)
-
-        if missing_from_report:
-            st.error(
-                "El informe no permitió extraer automáticamente: "
-                + ", ".join(missing_from_report)
-                + "."
-            )
-            st.stop()
-
-        st.success("✅ Datos técnicos del punto móvil extraídos automáticamente.")
-
-        # Compact technical read-only summary.
-        st.markdown('<div class="step">DATOS EXTRAÍDOS AUTOMÁTICAMENTE</div>', unsafe_allow_html=True)
-
-        a1, a2, a3 = st.columns(3)
-        a1.metric("Norte", f"{data.norte} m")
-        a2.metric("Este", f"{data.este} m")
-        a3.metric("Zona", data.zona)
-
-        b1, b2, b3 = st.columns(3)
-        b1.metric("Latitud", data.latitud)
-        b2.metric("Longitud", data.longitud)
-        b3.metric("Alt. elipsoidal", f"{data.alt_ellipsoidal} m")
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Estación GNSS", data.estacion_gnss)
-        c2.metric("Fecha posición", data.fecha_posicion)
-        c3.metric("Año", data.anio)
-
-        st.caption(
-            "Estos datos provienen del PUNTO MÓVIL del informe Leica; no se usa la coordenada de la estación de referencia para el certificado."
-        )
-
-        st.markdown('<div class="step">PASO 2</div>', unsafe_allow_html=True)
-        st.subheader("Completa los datos que no aparecen en el informe")
-
-        data.codigo = st.text_input(
-            "Código del punto geodésico *",
-            value="",
-            key="cert_codigo_v6",
-            placeholder="Ejemplo: PG2625",
-            help="Obligatorio. Este código debe ser proporcionado por el responsable del proyecto.",
-        )
-        data.solicitante = st.text_input(
-            "Solicitante *",
-            value="",
-            key="cert_solicitante_v6",
-            placeholder="Nombre del propietario o solicitante",
-            help="Obligatorio. No se toma del PDF de procesamiento.",
-        )
-
-        st.caption("⚠️ El código del punto y el solicitante son los únicos datos que debes ingresar manualmente.")
-
-        st.markdown('<div class="step">PASO 3</div>', unsafe_allow_html=True)
-        st.subheader("Imagen del punto geodésico")
-
-        image_file = st.file_uploader(
-            "Fotografía de la placa o punto geodésico (opcional)",
-            type=["png", "jpg", "jpeg"],
-            key="certificate_img_v6",
-        )
-
-        if image_file:
-            st.success("✅ Se utilizará la fotografía proporcionada.")
-        else:
-            st.info(
-                "No se cargó fotografía. Se generará una ilustración de placa con el código del punto."
-            )
-
-        st.markdown('<div class="step">PASO 4</div>', unsafe_allow_html=True)
-        generate = st.button(
-            "📜 GENERAR CERTIFICADO PDF + WORD",
-            type="primary",
-            use_container_width=True,
-        )
-
-    with right:
-        card(
-            "📄 Informe Leica",
-            f"Archivo: {report_file.name}<br>"
-            f"Referencia: <b>{report.reference_name or '—'}</b><br>"
-            f"Punto móvil: <b>{report.mobile_name or '—'}</b><br>"
-            f"Solución: <b>{report.solution_type or '—'}</b><br>"
-            f"Lectura: <b>{report.duration or '—'}</b>"
-        )
-        card(
-            "📌 Datos automáticos",
-            "Norte · Este · Zona · Latitud · Longitud · Alt. elipsoidal · "
-            "Estación GNSS · Fecha de posicionamiento · Año"
-        )
-        card(
-            "✍️ Datos manuales obligatorios",
-            "<b>Código del punto geodésico</b><br>"
-            "<b>Solicitante</b>"
-        )
-        card(
-            "📅 Fecha de emisión",
-            f"Se genera automáticamente con la fecha actual: <b>{data.fecha_emision}</b>."
-        )
-
-        if report.mobile_receiver or report.mobile_antenna:
-            card(
-                "📡 Equipo del punto móvil",
-                f"Receptor: {report.mobile_receiver or '—'}<br>"
-                f"Antena: {report.mobile_antenna or '—'}<br>"
-                f"Altura: {report.mobile_antenna_height_m or '—'} m"
-            )
-
-    if generate:
-        if not data.codigo.strip() or not data.solicitante.strip():
-            st.error("⚠️ Debes ingresar el Código del punto geodésico y el Solicitante.")
-            st.stop()
-
-        # Use fixed certificate metadata from the provided reference template.
-        # These fields are not claimed to come from the GNSS report.
-        if not data.tipo_orden:
-            data.tipo_orden = "C"
-
-        if not data.correlativo:
-            data.correlativo = f"CP-{data.anio}-{data.codigo.strip().upper()}"
-
-        tmpdir = Path(tempfile.mkdtemp(prefix="conplanos_cert_"))
-        try:
-            if image_file:
-                image_path = tmpdir / "punto.png"
-                image_path.write_bytes(image_file.getvalue())
-                image_note = "Fotografía proporcionada por el usuario."
+            if not report_file:
+                st.info("Sube el informe Leica para llenar automáticamente los datos técnicos del punto móvil.")
             else:
-                image_path = make_plaque(data.codigo, tmpdir / "placa_generada.png")
-                image_note = "Ilustración generada automáticamente; no es una fotografía de campo."
+                try:
+                    report = parse_report_pdfs([(report_file.name, report_file.getvalue())])
+                    data = extract_certificate_data(report, defaults)
+                except Exception as exc:
+                    st.error(f"No se pudo extraer el informe Leica: {exc}")
+                    st.stop()
 
-            docx_path = tmpdir / f"Certificado_{data.codigo.strip()}.docx"
-            pdf_path = tmpdir / f"Certificado_{data.codigo.strip()}.pdf"
+                missing = [label for label, value in [
+                    ("Norte", data.norte), ("Este", data.este), ("Zona", data.zona),
+                    ("Latitud", data.latitud), ("Longitud", data.longitud),
+                    ("Alt. elipsoidal", data.alt_ellipsoidal), ("Estación GNSS", data.estacion_gnss),
+                    ("Fecha de posicionamiento", data.fecha_posicion),
+                ] if not str(value).strip()]
+                if missing:
+                    st.error("Faltan datos técnicos del informe: " + ", ".join(missing))
+                    st.stop()
 
-            generate_certificate_docx(
-                data,
-                image_path,
-                TEMPLATES_DIR / "certificado_punto_geodesico_template.docx",
-                docx_path,
-            )
-            generate_certificate_pdf(
-                data,
-                image_path,
-                TEMPLATES_DIR / "certificate_template.pdf",
-                pdf_path,
-            )
+                st.success("✅ Datos del PUNTO MÓVIL extraídos automáticamente.")
+                st.markdown('<div class="step">DATOS DEL PUNTO MÓVIL</div>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="card" style="border:2px solid #2563eb;background:#eff6ff;">'
+                    f'<div class="card-title">📍 Coordenadas certificadas</div>'
+                    f'<div class="small"><b>N:</b> {data.norte} m &nbsp; <b>E:</b> {data.este} m &nbsp; <b>Zona:</b> {data.zona}<br>'
+                    f'<b>Lat:</b> {data.latitud} &nbsp; <b>Lon:</b> {data.longitud}<br>'
+                    f'<b>H elipsoidal:</b> {data.alt_ellipsoidal} m</div></div>', unsafe_allow_html=True)
 
-            st.success("✅ Certificado generado correctamente.")
-            st.caption(image_note)
+                st.markdown('<div class="step">PASO 2</div>', unsafe_allow_html=True)
+                st.subheader("Datos que debes ingresar manualmente")
+                st.warning("🔴 Código del punto y Solicitante son obligatorios. No se extraen del informe Leica.")
+                data.codigo = st.text_input("Código del punto geodésico *", key="cert_codigo_v7", placeholder="Ejemplo: PG2625")
+                data.solicitante = st.text_input("Solicitante *", key="cert_solicitante_v7", placeholder="Nombre del propietario o solicitante")
 
-            d1, d2 = st.columns(2)
-            with d1:
-                st.download_button(
-                    "⬇️ Descargar PDF",
-                    pdf_path.read_bytes(),
-                    file_name=pdf_path.name,
-                    mime="application/pdf",
-                    use_container_width=True,
-                )
-            with d2:
-                st.download_button(
-                    "⬇️ Descargar Word",
-                    docx_path.read_bytes(),
-                    file_name=docx_path.name,
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True,
-                )
+                st.markdown('<div class="step">PASO 3</div>', unsafe_allow_html=True)
+                image_file = st.file_uploader("Fotografía de la placa o punto geodésico (opcional)", type=["png", "jpg", "jpeg"], key="certificate_img_v7")
+                if image_file:
+                    st.success("✅ Se utilizará la fotografía proporcionada.")
+                else:
+                    st.info("Si no subes una foto, se generará una placa ilustrativa con el código.")
 
-            
-        except Exception as exc:
-            st.error(f"No se pudo generar el certificado: {exc}")
+                st.markdown('<div class="step">PASO 4</div>', unsafe_allow_html=True)
+                generate = st.button("📜 GENERAR CERTIFICADO PDF + WORD", type="primary", use_container_width=True)
+
+                if generate:
+                    if not data.codigo.strip() or not data.solicitante.strip():
+                        st.error("⚠️ Debes ingresar el Código del punto geodésico y el Solicitante.")
+                        st.stop()
+                    if not data.correlativo:
+                        data.correlativo = f"CP-{data.anio}-{data.codigo.strip().upper()}"
+                    tmpdir = Path(tempfile.mkdtemp(prefix="conplanos_cert_"))
+                    try:
+                        if image_file:
+                            image_path = tmpdir / "punto.png"
+                            image_path.write_bytes(image_file.getvalue())
+                        else:
+                            image_path = make_plaque(data.codigo, tmpdir / "placa_generada.png")
+                        docx_path = tmpdir / f"Certificado_{data.codigo.strip()}.docx"
+                        pdf_path = tmpdir / f"Certificado_{data.codigo.strip()}.pdf"
+                        generate_certificate_docx(data, image_path, TEMPLATES_DIR / "certificado_punto_geodesico_template.docx", docx_path)
+                        generate_certificate_pdf(data, image_path, TEMPLATES_DIR / "certificate_template.pdf", pdf_path)
+                        st.session_state["last_certificate_record"] = make_record(data, report, report_file.name, pdf_path.name, docx_path.name)
+                        st.session_state["last_certificate_paths"] = (pdf_path.read_bytes(), docx_path.read_bytes(), pdf_path.name, docx_path.name)
+                        if history_configured():
+                            try:
+                                append_point(st.session_state["last_certificate_record"])
+                                st.success("✅ Certificado generado y registrado en Google Sheets.")
+                            except Exception as exc:
+                                st.warning(f"Certificado generado. No se pudo guardar en Google Sheets: {exc}")
+                        else:
+                            st.success("✅ Certificado generado. Google Sheets aún no está configurado.")
+                    except Exception as exc:
+                        st.error(f"No se pudo generar el certificado: {exc}")
+
+        with right:
+            card("📌 Regla del certificado", "El certificado corresponde al <b>PUNTO MÓVIL</b> del informe Leica. La estación de referencia no se certifica en este documento.")
+            card("🤖 Automático", "Norte · Este · Zona · Latitud · Longitud · H elipsoidal · Estación GNSS · Fecha de posicionamiento · Año")
+            card("✍️ Manual obligatorio", "<b>Código del punto geodésico</b><br><b>Solicitante</b>")
+            card("📅 Fecha de emisión", f"Automática: <b>{defaults.fecha_emision}</b>")
+            if report_file:
+                card("📄 Informe", f"Archivo: {report_file.name}<br>Referencia: {report.reference_name or '—'}<br>Móvil: {report.mobile_name or '—'}<br>Solución: {report.solution_type or report.solution_state or '—'}")
+
+    with tab_hist:
+        st.markdown('<div class="step">HISTORIAL</div>', unsafe_allow_html=True)
+        if not history_configured():
+            st.warning("Google Sheets no está configurado todavía. La herramienta está preparada para conectarse mediante Streamlit Secrets.")
+            st.code('[gcp_service_account]\ntype = "service_account"\n...\n\nGOOGLE_SHEET_ID = "ID_DE_TU_HOJA"')
+        else:
+            try:
+                records = load_points()
+            except Exception as exc:
+                st.error(f"No se pudo leer Google Sheets: {exc}")
+                records = []
+            if not records:
+                st.info("Todavía no hay puntos certificados registrados.")
+            else:
+                import pydeck as pdk
+                import pandas as pd
+                rows = []
+                for r in records:
+                    lat = dms_to_decimal(r.get("latitud", ""))
+                    lon = dms_to_decimal(r.get("longitud", ""))
+                    if lat is not None and lon is not None:
+                        rr = dict(r); rr["lat"] = lat; rr["lon"] = lon; rows.append(rr)
+                f1, f2 = st.columns([1.5, 1])
+                search = f1.text_input("🔎 Buscar código o solicitante", key="hist_search_v7")
+                years = sorted({str(r.get("anio", "")) for r in records if r.get("anio")}, reverse=True)
+                year = f2.selectbox("Año", ["Todos"] + years, key="hist_year_v7")
+                filtered = [r for r in rows if (not search or search.casefold() in (r.get("codigo", "") + " " + r.get("solicitante", "")).casefold()) and (year == "Todos" or r.get("anio") == year)]
+                st.caption(f"{len(filtered)} punto(s) mostrado(s) de {len(records)} registrado(s).")
+                if filtered:
+                    df = pd.DataFrame(filtered)
+                    layer = pdk.Layer("ScatterplotLayer", data=df, id="puntos-certificados", get_position="[lon, lat]", get_fill_color="[15, 118, 110, 190]", get_radius=45, pickable=True, auto_highlight=True)
+                    center_lat = float(df["lat"].mean()); center_lon = float(df["lon"].mean())
+                    deck = pdk.Deck(layers=[layer], initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=9), tooltip={"text": "{codigo}\n{solicitante}\n{fecha_posicion}"}, map_style=None)
+                    event = st.pydeck_chart(deck, on_select="rerun", selection_mode="single-object", key="cert_map_v7")
+                    selected = None
+                    try:
+                        objs = event.selection.objects.get("puntos-certificados", [])
+                        if objs: selected = objs[0]
+                    except Exception:
+                        pass
+                    if selected:
+                        st.markdown(f"### 📍 {selected.get('codigo','Punto')}")
+                        a,b = st.columns(2)
+                        a.metric("Norte", f"{selected.get('norte','—')} m"); b.metric("Este", f"{selected.get('este','—')} m")
+                        card("Ficha del punto", f"Solicitante: <b>{selected.get('solicitante','—')}</b><br>Zona: {selected.get('zona','—')}<br>Latitud: {selected.get('latitud','—')}<br>Longitud: {selected.get('longitud','—')}<br>H elipsoidal: {selected.get('alt_ellipsoidal','—')} m<br>Estación: {selected.get('estacion_gnss','—')}<br>Fecha posición: {selected.get('fecha_posicion','—')}<br>Fecha emisión: {selected.get('fecha_emision','—')}<br>Solución: {selected.get('solucion','—')}<br>Duración: {selected.get('duracion_lectura','—')}<br>Distancia: {selected.get('distancia_m','—')} m")
+                else:
+                    st.info("No hay coordenadas geográficas válidas para mostrar en el mapa.")
+
+elif tool == "Efemérides precisas":
+    st.subheader("📡 Efemérides precisas")
+    st.caption("Busca productos finales para: un día antes · día de lectura · un día después.")
+    target = st.date_input("Fecha de lectura", value=date.today(), key="eph_date_v7")
+    st.markdown("**Prioridad de búsqueda:** ESA Final 5 min → IGS Final 15 min → otras soluciones Final 5 min.")
+    if st.button("🔎 BUSCAR EFEMÉRIDES FINALES", type="primary", use_container_width=True):
+        with st.spinner("Comprobando disponibilidad de productos oficiales…"):
+            products = find_products(target, check=True)
+        grouped = group_by_day(products)
+        for d in [target + timedelta(days=delta) for delta in (-1,0,1)]:
+            st.markdown(f"### {d.strftime('%d/%m/%Y')} — {'día anterior' if d < target else 'día de lectura' if d == target else 'día siguiente'}")
+            for p in grouped.get(d, []):
+                if p.status == "Disponible":
+                    st.markdown(f"🟢 **{p.label}** · {p.sampling} · `{p.filename}`  ")
+                    st.markdown(f"[⬇️ Descargar producto]({p.url})")
+                elif p.source in {"ESA", "IGS"}:
+                    st.markdown(f"⚪ **{p.label}** · {p.status} · `{p.filename}`")
+        st.info("Nota: CDDIS puede requerir autenticación Earthdata. ESA publica sus Final por día en su archivo oficial.")
