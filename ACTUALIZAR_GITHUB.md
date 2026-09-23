@@ -1,12 +1,8 @@
-## V9.1 — corrección de arranque
+# ACTUALIZAR CONPLANOS GNSS
 
-Se corrigió un error de importación en `core.py` que impedía iniciar la app en Streamlit Cloud. Reemplaza `app.py` y `core.py` por los de esta versión.
+## V10
 
-# Actualizar CONPLANOS GNSS sin cambiar nombres
-
-La V9 mantiene los nombres principales de los archivos. Para las próximas versiones, reemplaza los archivos indicados por CONPLANOS y mantén el resto del proyecto.
-
-## Archivos que normalmente se reemplazan
+Reemplaza en GitHub los archivos con los mismos nombres del proyecto:
 
 - `app.py`
 - `core.py`
@@ -14,20 +10,24 @@ La V9 mantiene los nombres principales de los archivos. Para las próximas versi
 - `certificate.py`
 - `ephemeris.py`
 - `requirements.txt`
-- `.streamlit/config.toml` solo si CONPLANOS indica un cambio
-- archivos dentro de `templates/` solo cuando se indique
+- `packages.txt`
+- `templates/plaque_generada_template.png` y demás plantillas si se incluyen
 
-No cambies los nombres a `app_v9.py`, `core_v9.py`, etc. La aplicación siempre trabaja con `app.py`, `core.py`, etc.
+No crees archivos `app_v10.py`, `core_v10.py`, etc. La estrategia es siempre mantener los mismos nombres para que GitHub los reemplace.
 
-## Pasos
+### Nueva interfaz V10
 
-1. Abre el repositorio en GitHub.
-2. Entra al archivo que CONPLANOS indique.
-3. Reemplaza su contenido subiendo el archivo con el mismo nombre o usando `Upload files` y confirmando el reemplazo.
-4. Mantén `requirements.txt` en la raíz.
-5. No subas `.streamlit/secrets.toml` ni credenciales reales.
-6. Espera que Streamlit Community Cloud reconstruya la aplicación.
+- Efemérides en vista compacta de tres días.
+- ESA e IGS principales visibles; otras soluciones dentro de un expander.
+- Descarga directa a la derecha de cada producto.
+- Visor de certificados con búsqueda por UTM WGS84.
+- Conversión automática UTM → WGS84.
+- Zoom automático al punto más cercano.
+- Puntos certificados y externos con simbología diferente.
+- Punto más cercano resaltado.
+- Corrección del `StreamlitWidgetAlreadyInstantiatedError` del visor.
+- Historial persistente mediante Google Sheets.
 
-## V9
+### Historial permanente
 
-V9 agrega la placa oficial CONPLANOS como plantilla de respaldo del certificado: se conservan el diseño de la imagen y se sustituyen dinámicamente el código del punto y el año. También incluye OpenCV para una limpieza natural de los números originales.
+Configura Google Sheets siguiendo `GOOGLE_SHEETS_Y_LOGIN.md`.

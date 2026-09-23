@@ -48,7 +48,7 @@ from certificate import (
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 LOGO_PATH = TEMPLATES_DIR / "logo_conplanos.png"
-VERSION = "9.1"
+VERSION = "10.0"
 
 st.set_page_config(
     page_title="CONPLANOS GNSS",
@@ -75,6 +75,13 @@ st.markdown(
       .brand-footer {margin-top:1.2rem;padding:.65rem .4rem;border-top:1px solid #e5e7eb;text-align:center;color:#6b7280;font-size:.72rem;}
       .brand-badge {border-radius:11px;overflow:hidden;border:1px solid #e5e7eb;margin:.2rem 0 .7rem 0;background:#111;}
       .download-head {font-size:.88rem;font-weight:750;margin-top:.8rem;margin-bottom:.35rem;}
+      .eph-day {border:1px solid #e5e7eb;border-radius:14px;padding:.55rem .65rem;background:#fff;min-height:320px;}
+      .eph-day-title {font-size:.93rem;font-weight:800;margin-bottom:.45rem;}
+      .eph-row {display:grid;grid-template-columns:1.15fr 1.8fr .55fr;gap:.35rem;align-items:center;border-top:1px solid #f1f5f9;padding:.42rem 0;}
+      .eph-src {font-size:.74rem;font-weight:700;color:#111827;}
+      .eph-file {font-size:.62rem;line-height:1.2;color:#6b7280;word-break:break-all;}
+      .eph-status {font-size:.61rem;color:#166534;}
+      .map-legend {font-size:.72rem;color:#4b5563;margin:.35rem 0 .55rem;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -247,6 +254,8 @@ with st.sidebar:
     with st.expander("Versiones", expanded=False):
         st.markdown(
             """
+            **V10 · Visor UTM WGS84 + mapa profesional + efemérides compactas + corrección del error de historial.**
+
             **V9.1 · Corrección de arranque + placa oficial CONPLANOS como respaldo + código y año dinámicos.**
 
             **V8 · Múltiples archivos + descargas persistentes + lectura inteligente E/N + TIN de alturas + visor WGS84/Google Maps + login Google.**
@@ -270,7 +279,7 @@ with st.sidebar:
     if auth_is_configured() and getattr(st.user, "is_logged_in", False):
         st.caption(f"👤 {getattr(st.user, 'name', '') or getattr(st.user, 'email', '')}")
         st.button("Cerrar sesión", on_click=st.logout, use_container_width=True)
-    st.caption("CONPLANOS GNSS · versión 9")
+    st.caption("CONPLANOS GNSS · versión 10.0")
 
 st.markdown('<div class="app-title">🛰️ CONPLANOS - Herramientas GNSS</div>', unsafe_allow_html=True)
 
@@ -708,132 +717,234 @@ elif tool == "Certificados":
         map_points = []
         for r in cert_records:
             p = cert_record_to_map(r)
-            if p: map_points.append(p)
+            if p:
+                map_points.append(p)
         for r in ext_records:
             p = external_record_to_map(r)
-            if p: map_points.append(p)
+            if p:
+                map_points.append(p)
 
-        q1, q2, q3 = st.columns([1.3, 1.0, 1.0])
-        place = q1.text_input("🔎 Buscar lugar en Google Maps", placeholder="Cusco, Sacsayhuamán, etc.", key="map_place_v8")
-        if place:
-            st.markdown(f"[🌐 Abrir búsqueda de lugar en Google Maps](https://www.google.com/maps/search/?api=1&query={place.replace(' ', '+')})")
-        target_lat = q2.number_input("Latitud WGS84", min_value=-90.0, max_value=90.0, value=-13.5170, format="%.8f", key="map_lat_v8")
-        target_lon = q3.number_input("Longitud WGS84", min_value=-180.0, max_value=180.0, value=-71.9787, format="%.8f", key="map_lon_v8")
-        if st.button("🎯 Centrar y buscar el punto más cercano", key="map_nearest_v8"):
-            if map_points:
-                nearest = min(map_points, key=lambda p: haversine_m(target_lat, target_lon, p["lat"], p["lon"]))
-                distance = haversine_m(target_lat, target_lon, nearest["lat"], nearest["lon"])
-                st.session_state["map_target_v8"] = (target_lat, target_lon)
-                st.session_state["map_nearest_v8"] = (nearest, distance)
-        nearest_data = st.session_state.get("map_nearest_v8")
-        if nearest_data:
+        # ---------------- Search / locate ----------------
+        search_left, search_right = st.columns([1.7, 1.15], gap="large")
+        with search_left:
+            st.markdown("**🎯 Buscar por coordenadas WGS84 / UTM**")
+            a1, a2, a3 = st.columns([1.15, 1.15, .72])
+            e_text = a1.text_input("Este (E)", placeholder="Ej. 180000.1234", key="map_utm_e_v10")
+            n_text = a2.text_input("Norte (N)", placeholder="Ej. 8550000.5678", key="map_utm_n_v10")
+            zone = a3.number_input("Zona", min_value=1, max_value=60, value=18, step=1, key="map_utm_zone_v10")
+            hemi = a3.selectbox("Hemisferio", ["Sur", "Norte"], index=0, key="map_utm_hemi_v10")
+            if st.button("🎯 UBICAR Y BUSCAR PUNTO MÁS CERCANO", type="primary", key="map_find_nearest_v10", use_container_width=True):
+                try:
+                    e_val = float(str(e_text).replace(",", "").strip())
+                    n_val = float(str(n_text).replace(",", "").strip())
+                    target_lat, target_lon = utm_to_wgs84(e_val, n_val, int(zone), south=(hemi == "Sur"))
+                    if target_lat is None or target_lon is None:
+                        raise ValueError("No se pudo convertir la coordenada UTM a WGS84.")
+                    st.session_state["map_target_utm_v10"] = {"e": e_val, "n": n_val, "zone": int(zone), "hemi": hemi}
+                    st.session_state["map_target_wgs84_v10"] = (target_lat, target_lon)
+                    st.session_state["map_nearest_result_v10"] = None
+                    if map_points:
+                        nearest = min(map_points, key=lambda q: haversine_m(target_lat, target_lon, q["lat"], q["lon"]))
+                        distance = haversine_m(target_lat, target_lon, nearest["lat"], nearest["lon"])
+                        st.session_state["map_nearest_result_v10"] = (nearest, distance)
+                    st.session_state["map_view_version_v10"] = st.session_state.get("map_view_version_v10", 0) + 1
+                except Exception as exc:
+                    st.error(f"Revisa E, N y zona UTM: {exc}")
+
+        with search_right:
+            st.markdown("**🔎 Buscar lugar**")
+            place = st.text_input("Lugar o referencia", placeholder="Cusco, Sacsayhuamán, etc.", key="map_place_v10")
+            if place:
+                st.link_button("🌐 Abrir búsqueda en Google Maps", f"https://www.google.com/maps/search/?api=1&query={place.replace(' ', '+')}", use_container_width=True)
+            if history_configured():
+                st.success(f"☁️ Historial permanente conectado · {len(cert_records)} certificados · {len(ext_records)} puntos externos")
+            else:
+                st.warning("☁️ Google Sheets no está configurado: el historial se conserva solo durante esta sesión.")
+
+        nearest_data = st.session_state.get("map_nearest_result_v10")
+        target_wgs = st.session_state.get("map_target_wgs84_v10")
+        if nearest_data and target_wgs:
             nearest, dist = nearest_data
-            status(f"📍 Punto más cercano: <b>{nearest.get('etiqueta','Punto')}</b> · {dist:.2f} m desde la coordenada WGS84 ingresada.", "ok")
-            st.markdown(f"[🌐 Abrir coordenada objetivo en Google Maps]({google_maps_url(target_lat, target_lon)}) · [🗺️ Ver mapa centrado]({google_maps_view_url(target_lat, target_lon)})")
-            st.markdown(f"[🌐 Abrir punto más cercano en Google Maps]({google_maps_url(nearest['lat'], nearest['lon'])})")
-            show_google_embed(target_lat, target_lon, zoom=15)
+            status(f"📍 <b>{nearest.get('etiqueta','Punto')}</b> es el punto más cercano · distancia horizontal aproximada: <b>{dist:.2f} m</b>.", "ok")
+            u = st.session_state.get("map_target_utm_v10", {})
+            st.caption(f"Objetivo UTM WGS84: E {u.get('e','—'):.4f} · N {u.get('n','—'):.4f} · Zona {u.get('zone','—')} {u.get('hemi','')}")
+            g1, g2, g3 = st.columns(3)
+            g1.link_button("🌐 Objetivo en Google Maps", google_maps_url(*target_wgs), use_container_width=True)
+            g2.link_button("📍 Punto más cercano", google_maps_url(nearest['lat'], nearest['lon']), use_container_width=True)
+            g3.link_button("🗺️ Mapa centrado", google_maps_view_url(nearest['lat'], nearest['lon'], zoom=17), use_container_width=True)
+            show_google_embed(nearest['lat'], nearest['lon'], zoom=17)
 
-        st.markdown('<div class="step">REGISTRAR OTROS PUNTOS</div>', unsafe_allow_html=True)
-        ext_uploads = st.file_uploader(
-            "Sube uno o varios PDF/DOCX/CSV/Excel de otros puntos geodésicos", type=["pdf", "docx", "csv", "xlsx", "xlsm"],
-            accept_multiple_files=True, key="external_points_upload_v8",
-            help="La app intentará tomar el punto móvil de Leica o identificar pares UTM E/N. Para UTM sin zona usa la zona por defecto indicada abajo."
-        )
-        default_zone = st.number_input("Zona UTM por defecto para fuentes sin zona", min_value=1, max_value=60, value=18, step=1, key="external_zone_v8")
-        if ext_uploads:
-            points, diagnostics = extract_coordinate_sources([(f.name, f.getvalue()) for f in ext_uploads])
-            st.dataframe(diagnostics, use_container_width=True, hide_index=True)
-            external_pending = []
-            for i, p in enumerate(points, start=1):
-                zone = p.zone or int(default_zone)
-                lat, lon = utm_to_wgs84(p.e, p.n, zone, south=True)
-                if lat is None:
-                    continue
-                code = p.name or f"EXT-{i:03d}"
-                external_pending.append(make_external_record(
-                    codigo=code, nombre=p.name or code, norte=p.n, este=p.e,
-                    zona=f"{zone} Sur", latitud=lat, longitud=lon,
-                    fuente=p.source or "Archivo", observacion="Extraído automáticamente. Verificar antes de usar como referencia oficial."
-                ))
-            if external_pending:
-                st.dataframe(external_pending, use_container_width=True, hide_index=True)
-                if st.button("📌 REGISTRAR ESTOS PUNTOS EN EL VISOR", key="register_external_v8", type="primary"):
-                    st.session_state.setdefault("external_session_records_v8", []).extend(external_pending)
-                    if history_configured():
-                        try:
-                            append_external_points(external_pending)
-                            st.success("✅ Puntos registrados en la pestaña OtrosPuntos de Google Sheets.")
-                        except Exception as exc:
-                            st.warning(f"Los puntos quedaron en la sesión, pero no se pudieron guardar en Google Sheets: {exc}")
-                    else:
-                        st.success("✅ Puntos registrados en esta sesión. Configura Google Sheets para conservarlos.")
+        # ---------------- Register external points ----------------
+        with st.expander("📌 Registrar otros puntos geodésicos desde documentos", expanded=False):
+            ext_uploads = st.file_uploader(
+                "Sube uno o varios PDF/DOCX/CSV/Excel de otros puntos geodésicos",
+                type=["pdf", "docx", "csv", "xlsx", "xlsm"],
+                accept_multiple_files=True, key="external_points_upload_v10",
+                help="La app intentará tomar el punto móvil Leica o pares UTM E/N. Para UTM sin zona usa la zona por defecto."
+            )
+            default_zone = st.number_input("Zona UTM por defecto", min_value=1, max_value=60, value=18, step=1, key="external_zone_v10")
+            if ext_uploads:
+                points, diagnostics = extract_coordinate_sources([(f.name, f.getvalue()) for f in ext_uploads])
+                st.dataframe(diagnostics, use_container_width=True, hide_index=True)
+                external_pending = []
+                for i, q in enumerate(points, start=1):
+                    if q.e is None or q.n is None:
+                        continue
+                    z = q.zone or int(default_zone)
+                    lat, lon = utm_to_wgs84(q.e, q.n, z, south=True)
+                    if lat is None:
+                        continue
+                    code = q.name or f"EXT-{i:03d}"
+                    external_pending.append(make_external_record(
+                        codigo=code, nombre=q.name or code, norte=q.n, este=q.e,
+                        zona=f"{z} Sur", latitud=lat, longitud=lon,
+                        fuente=q.source or "Archivo", observacion="Extraído automáticamente. Verificar antes de usar como referencia oficial."
+                    ))
+                if external_pending:
+                    st.dataframe(external_pending, use_container_width=True, hide_index=True)
+                    if st.button("📌 REGISTRAR ESTOS PUNTOS EN EL VISOR", key="register_external_v10", type="primary"):
+                        st.session_state.setdefault("external_session_records_v8", []).extend(external_pending)
+                        if history_configured():
+                            try:
+                                append_external_points(external_pending)
+                                st.success("✅ Puntos registrados en OtrosPuntos de Google Sheets.")
+                            except Exception as exc:
+                                st.warning(f"Los puntos quedaron en la sesión, pero no se pudieron guardar en Google Sheets: {exc}")
+                        else:
+                            st.success("✅ Puntos registrados en esta sesión. Configura Google Sheets para conservarlos.")
 
+        # ---------------- Professional map ----------------
         if not map_points:
             st.info("Todavía no hay puntos con coordenadas geográficas válidas. Genera un certificado o registra otros puntos.")
         else:
             import pydeck as pdk
-            cert_df = [p for p in map_points]
-            # Distinct visual groups without requiring external tile keys.
-            layer_cert = pdk.Layer("ScatterplotLayer", data=cert_df, id="puntos-conplanos", get_position="[lon, lat]", get_fill_color="[15,118,110,190]", get_radius=45, pickable=True, auto_highlight=True)
-            center = min(cert_df, key=lambda p: haversine_m(target_lat, target_lon, p["lat"], p["lon"])) if nearest_data else cert_df[0]
-            if st.session_state.get("map_target_v8"):
-                center_lat, center_lon = st.session_state["map_target_v8"]
+            target = target_wgs
+            nearest = nearest_data[0] if nearest_data else None
+            cert_data = [p for p in map_points if p.get("tipo_mapa") == "Certificado"]
+            ext_data = [p for p in map_points if p.get("tipo_mapa") == "Externo"]
+            nearest_data_list = [nearest] if nearest else []
+            target_data = [{"lat": target[0], "lon": target[1], "etiqueta": "COORDENADA OBJETIVO"}] if target else []
+
+            layers = []
+            if cert_data:
+                layers.append(pdk.Layer(
+                    "ScatterplotLayer", data=cert_data, id="certificados", get_position="[lon, lat]",
+                    get_fill_color=[15,118,110,220], get_line_color=[255,255,255,230], get_line_width=2,
+                    get_radius=55, radius_min_pixels=5, radius_max_pixels=12, pickable=True, auto_highlight=True,
+                ))
+            if ext_data:
+                layers.append(pdk.Layer(
+                    "ScatterplotLayer", data=ext_data, id="puntos-externos", get_position="[lon, lat]",
+                    get_fill_color=[245,158,11,220], get_line_color=[255,255,255,230], get_line_width=2,
+                    get_radius=55, radius_min_pixels=5, radius_max_pixels=12, pickable=True, auto_highlight=True,
+                ))
+            if nearest_data_list:
+                layers.append(pdk.Layer(
+                    "ScatterplotLayer", data=nearest_data_list, id="punto-mas-cercano", get_position="[lon, lat]",
+                    get_fill_color=[220,38,38,245], get_line_color=[255,255,255,255], get_line_width=3,
+                    get_radius=120, radius_min_pixels=10, radius_max_pixels=22, pickable=True,
+                ))
+            if target_data:
+                layers.append(pdk.Layer(
+                    "ScatterplotLayer", data=target_data, id="objetivo", get_position="[lon, lat]",
+                    get_fill_color=[37,99,235,80], get_line_color=[37,99,235,255], get_line_width=3,
+                    get_radius=140, radius_min_pixels=13, radius_max_pixels=28, pickable=False,
+                ))
+            labels = cert_data + ext_data
+            if labels:
+                layers.append(pdk.Layer(
+                    "TextLayer", data=labels, id="etiquetas-puntos", get_position="[lon, lat]", get_text="etiqueta",
+                    get_size=13, get_color=[31,41,55], get_pixel_offset=[0,-18], pickable=False,
+                ))
+
+            if target:
+                center_lat, center_lon = (nearest["lat"], nearest["lon"]) if nearest else target
+                zoom = 17 if nearest else 14
             else:
-                center_lat, center_lon = center["lat"], center["lon"]
+                center = map_points[0]
+                center_lat, center_lon, zoom = center["lat"], center["lon"], 12
+
+            map_key = f"cert_map_v10_{st.session_state.get('map_view_version_v10', 0)}"
             deck = pdk.Deck(
-                layers=[layer_cert],
-                initial_view_state=pdk.ViewState(latitude=float(center_lat), longitude=float(center_lon), zoom=9),
-                tooltip={"text": "{etiqueta}\n{tipo_mapa}\n{lat}, {lon}"},
+                layers=layers,
+                initial_view_state=pdk.ViewState(latitude=float(center_lat), longitude=float(center_lon), zoom=zoom, min_zoom=4, max_zoom=20, pitch=0),
+                tooltip={"html": "<b>{etiqueta}</b><br/>{tipo_mapa}<br/>Lat: {lat}<br/>Lon: {lon}<br/>N: {norte}<br/>E: {este}<br/>Zona: {zona}"},
                 map_style=None,
             )
-            event = st.pydeck_chart(deck, on_select="rerun", selection_mode="single-object", key="cert_map_v8")
+            st.markdown('<div class="map-legend">🟢 Certificados · 🟠 Otros puntos · 🔴 Punto más cercano · 🔵 Coordenada objetivo · Haz clic en cualquier punto para ver su ficha.</div>', unsafe_allow_html=True)
+            event = st.pydeck_chart(deck, on_select="rerun", selection_mode="single-object", key=map_key)
             selected = None
             try:
-                objs = event.selection.objects.get("puntos-conplanos", [])
-                if objs:
-                    selected = objs[0]
+                for layer_id in ("certificados", "puntos-externos", "punto-mas-cercano"):
+                    objs = event.selection.objects.get(layer_id, [])
+                    if objs:
+                        selected = objs[0]
+                        break
             except Exception:
                 pass
             if selected:
                 st.markdown(f"### 📍 {selected.get('etiqueta', 'Punto')}")
-                a, b = st.columns(2)
-                a.metric("Latitud", f"{selected.get('lat', 0):.8f}")
-                b.metric("Longitud", f"{selected.get('lon', 0):.8f}")
+                a, b, c = st.columns(3)
+                a.metric("Latitud", f"{float(selected.get('lat', 0)):.8f}")
+                b.metric("Longitud", f"{float(selected.get('lon', 0)):.8f}")
+                c.metric("Tipo", selected.get("tipo_mapa", "—"))
                 if selected.get("tipo_mapa") == "Certificado":
                     card("Ficha del certificado", f"Código: <b>{selected.get('codigo','—')}</b><br>Solicitante: {selected.get('solicitante','—')}<br>N: {selected.get('norte','—')} m · E: {selected.get('este','—')} m<br>Zona: {selected.get('zona','—')}<br>H elipsoidal: {selected.get('alt_ellipsoidal','—')} m<br>Estación: {selected.get('estacion_gnss','—')}<br>Fecha posición: {selected.get('fecha_posicion','—')}")
                 else:
                     card("Ficha del punto externo", f"Código: <b>{selected.get('codigo','—')}</b><br>Fuente: {selected.get('fuente','—')}<br>N: {selected.get('norte','—')} m · E: {selected.get('este','—')} m<br>Zona: {selected.get('zona','—')}<br>Observación: {selected.get('observacion','—')}")
-                st.markdown(f"[🌐 Abrir seleccionado en Google Maps]({google_maps_url(float(selected['lat']), float(selected['lon']))})")
-                show_google_embed(float(selected['lat']), float(selected['lon']), zoom=17)
-
-        if not history_configured():
-            st.caption("Google Sheets no configurado: el historial mostrado corresponde solo a la sesión actual.")
+                st.link_button("🌐 Abrir seleccionado en Google Maps", google_maps_url(float(selected['lat']), float(selected['lon'])), use_container_width=True)
 
 # ========================================================
 # Efemérides
 # ========================================================
 elif tool == "Efemérides precisas":
     st.subheader("📡 Efemérides precisas")
-    st.caption("Busca productos finales para: un día antes · día de lectura · un día después.")
-    target = st.date_input("Fecha de lectura", value=date.today(), key="eph_date_v8")
-    st.markdown("**Prioridad:** ESA Final 5 min → IGS Final 15 min → otras soluciones Final 5 min.")
-    if st.button("🔎 BUSCAR EFEMÉRIDES FINALES", type="primary", use_container_width=True, key="search_eph_v8"):
+    st.caption("Tres jornadas · finales oficiales · vista compacta")
+    target = st.date_input("Fecha de lectura", value=date.today(), key="eph_date_v10", format="DD/MM/YYYY")
+    if st.button("🔎 BUSCAR EFEMÉRIDES FINALES", type="primary", use_container_width=True, key="search_eph_v10"):
         with st.spinner("Comprobando disponibilidad de productos oficiales…"):
             products = find_products(target, check=True)
-        grouped = group_by_day(products)
-        for d in [target + timedelta(days=delta) for delta in (-1, 0, 1)]:
-            label = "día anterior" if d < target else "día de lectura" if d == target else "día siguiente"
-            st.markdown(f"### {d.strftime('%d/%m/%Y')} — {label}")
-            for p in grouped.get(d, []):
-                if p.status == "Disponible":
-                    st.markdown(f"🟢 **{p.label}** · {p.sampling} · `{p.filename}`")
-                    st.markdown(f"[⬇️ Descargar producto]({p.url})")
-                elif p.source in {"ESA", "IGS"}:
-                    st.markdown(f"⚪ **{p.label}** · {p.status} · `{p.filename}`")
-        st.info("Nota: CDDIS puede requerir autenticación Earthdata. ESA publica sus Final por día en su archivo oficial.")
+        st.session_state["eph_products_v10"] = group_by_day(products)
+        st.session_state["eph_target_v10"] = target
+
+    grouped = st.session_state.get("eph_products_v10")
+    eph_target = st.session_state.get("eph_target_v10", target)
+    if grouped is not None:
+        st.markdown("**Prioridad:** ESA Final 5 min → IGS Final 15 min → otros centros Final 5 min.")
+        day_cols = st.columns(3)
+        for col, delta, label in zip(day_cols, (-1, 0, 1), ("DÍA ANTERIOR", "DÍA DE LECTURA", "DÍA SIGUIENTE")):
+            d = eph_target + timedelta(days=delta)
+            day_products = grouped.get(d, [])
+            with col:
+                st.markdown(f'<div class="eph-day"><div class="eph-day-title">📅 {d.strftime("%d/%m/%Y")} · {label}</div>', unsafe_allow_html=True)
+                available = [p for p in day_products if p.status == "Disponible"]
+                principal = [p for p in available if p.label.startswith("ESA Final") or p.label.startswith("IGS Final")]
+                others = [p for p in available if p not in principal]
+                if not principal:
+                    st.markdown('<div class="tiny">Sin producto ESA/IGS disponible.</div>', unsafe_allow_html=True)
+                for p in principal:
+                    safe_label = p.label.replace(" Final", "")
+                    st.markdown('<div class="eph-row">', unsafe_allow_html=True)
+                    c1, c2, c3 = st.columns([1.05, 1.8, .55])
+                    c1.markdown(f'<div class="eph-src">🟢 {safe_label}<div class="eph-status">{p.sampling}</div></div>', unsafe_allow_html=True)
+                    c2.markdown(f'<div class="eph-file">{p.filename}</div>', unsafe_allow_html=True)
+                    c3.link_button("⬇️", p.url, use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                if others:
+                    with st.expander(f"Otras soluciones · {len(others)}", expanded=False):
+                        for p in others:
+                            c1, c2, c3 = st.columns([1.05, 1.8, .55])
+                            c1.markdown(f'<div class="eph-src">🟢 {p.label.replace(" Final", "")}<div class="eph-status">{p.sampling}</div></div>', unsafe_allow_html=True)
+                            c2.markdown(f'<div class="eph-file">{p.filename}</div>', unsafe_allow_html=True)
+                            c3.link_button("⬇️", p.url, use_container_width=True)
+                missing = [p for p in day_products if p.source in {"ESA", "IGS"} and p.status != "Disponible"]
+                if missing:
+                    st.markdown('<div class="tiny">⚪ Algún producto principal no está disponible o requiere autenticación.</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+        st.caption("Los productos ESA/IGS mostrados son archivos externos enlazados. CDDIS puede requerir autenticación Earthdata; ESA publica sus Final en su archivo oficial.")
 
 # ------------------ Footer ------------------
 st.markdown(
-    '<div class="brand-footer">Creado por <b>Ing Chris</b> · <b>CONPLANOS</b> · 928 400 600 · Herramientas GNSS</div>',
+    '<div class="brand-footer">Creado por <b>Ing Chris</b> · <b>CONPLANOS</b> · 928 400 600 · Herramientas GNSS · v10.0</div>',
     unsafe_allow_html=True,
 )

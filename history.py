@@ -41,7 +41,10 @@ def _client_and_sheet():
     sheet_id, account = _get_config()
     if not sheet_id or not account:
         raise RuntimeError("Google Sheets aún no está configurado en Streamlit Secrets.")
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
     creds = Credentials.from_service_account_info(dict(account), scopes=scopes)
     client = gspread.authorize(creds)
     return client, client.open_by_key(sheet_id)
