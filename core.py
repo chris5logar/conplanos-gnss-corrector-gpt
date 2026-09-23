@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import csv
 import io
 import re
@@ -7,9 +8,11 @@ from dataclasses import dataclass, asdict
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Optional
+import math
+import zipfile
 
 
-OBSERVATION_VALUE = "65"
+OBSERVATION_VALUE = "60"
 HEIGHT_WARNING_M = 40.0
 
 
@@ -702,7 +705,7 @@ def dataclass_dict(obj):
     return asdict(obj)
 
 # ============================================================
-# V4 - Generador de data derivada desde coordenadas de plano
+# V8 - Ingreso múltiple, normalización, lectura inteligente e interpolación TIN
 # ============================================================
 
 @dataclass
@@ -710,6 +713,8 @@ class CoordinatePoint:
     e: float
     n: float
     name: Optional[str] = None
+    source: Optional[str] = None
+    zone: Optional[int] = None
 
 
 def _norm_header(value: str) -> str:
@@ -728,11 +733,157 @@ def _coordinate_column(fieldnames: list[str], aliases: list[str]) -> Optional[st
     return None
 
 
+def _parse_flexible_number(value: str) -> float:
+    """Parses common decimal/thousands conventions used in Spanish reports."""
+    s = str(value).strip().replace("\u00a0", "")
+    if not s:
+        raise ValueError("Número vacío")
+    s = re.sub(r"[^0-9+\-.,]", "", s)
+    if "," in s and "." in s:
+        # Whichever separator appears last is treated as decimal separator.
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        parts = s.split(",")
+        if len(parts[-1]) in (1, 2, 3, 4) and len(parts) == 2:
+            s = s.replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    return float(s)
+
+
+def _utm_pair(a: float, b: float) -> tuple[float, float] | None:
+    """Return (E,N) only when the pair looks like metric UTM coordinates."""
+    vals = [float(a), float(b)]
+    first_e, first_n = vals
+    if 10_000 <= first_e <= 1_000_000 and 1_000_000 <= first_n <= 10_000_000:
+        return first_e, first_n
+    if 10_000 <= vals[1] <= 1_000_000 and 1_000_000 <= vals[0] <= 10_000_000:
+        return vals[1], vals[0]
+    return None
+
+
+def _extract_utm_pairs_from_text(text: str) -> list[CoordinatePoint]:
+    """Reads UTM E/N pairs from prose, tables and labeled lines."""
+    points: list[CoordinatePoint] = []
+    seen: set[tuple[float, float]] = set()
+    lines = [_clean_line(x) for x in text.splitlines() if _clean_line(x)]
+
+    # First: explicit labels such as Este: ... / Norte: ... or E=... N=...
+    label_patterns = [
+        re.compile(r"\b(?:este|easting|este\s*\(?e\)?|x)\b\s*[:=]?\s*([-+]?\d[\d.,]*)", re.I),
+        re.compile(r"\b(?:norte|northing|norte\s*\(?n\)?|y)\b\s*[:=]?\s*([-+]?\d[\d.,]*)", re.I),
+    ]
+    for line in lines:
+        em = label_patterns[0].search(line)
+        nm = label_patterns[1].search(line)
+        if em and nm:
+            try:
+                e = _parse_flexible_number(em.group(1)); n = _parse_flexible_number(nm.group(1))
+                pair = _utm_pair(e, n)
+                if pair:
+                    key = (round(pair[0], 4), round(pair[1], 4))
+                    if key not in seen:
+                        seen.add(key)
+                        points.append(CoordinatePoint(pair[0], pair[1]))
+            except Exception:
+                pass
+
+    # Second: any table/prose line containing a UTM-sized pair.
+    num_pattern = re.compile(r"[-+]?\d[\d\s.,]*\d|[-+]?\d")
+    for line in lines:
+        raw_tokens = num_pattern.findall(line)
+        if len(raw_tokens) < 2:
+            continue
+        nums: list[float] = []
+        for token in raw_tokens:
+            try:
+                nums.append(_parse_flexible_number(token))
+            except Exception:
+                continue
+        for i in range(len(nums)):
+            for j in range(i + 1, len(nums)):
+                pair = _utm_pair(nums[i], nums[j])
+                if not pair:
+                    continue
+                key = (round(pair[0], 4), round(pair[1], 4))
+                if key not in seen:
+                    seen.add(key)
+                    points.append(CoordinatePoint(pair[0], pair[1]))
+                break
+
+    return points
+
+
+def _extract_text_from_docx(raw_bytes: bytes) -> str:
+    try:
+        from lxml import etree
+    except ImportError as exc:
+        raise RuntimeError("Se necesita lxml para leer DOCX.") from exc
+    with zipfile.ZipFile(io.BytesIO(raw_bytes), "r") as z:
+        xml = z.read("word/document.xml")
+    root = etree.fromstring(xml)
+    parts = [t for t in root.xpath("//w:t/text()", namespaces={"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}) if t]
+    return "\n".join(parts)
+
+
+def _extract_text_from_pdf(raw_bytes: bytes) -> str:
+    try:
+        import fitz
+    except ImportError as exc:
+        raise RuntimeError("PyMuPDF no está instalado.") from exc
+    doc = fitz.open(stream=raw_bytes, filetype="pdf")
+    return "\n".join(page.get_text("text") for page in doc)
+
+
+def _ocr_image(raw_bytes: bytes) -> str:
+    try:
+        import pytesseract
+        from PIL import Image, ImageOps, ImageEnhance, ImageFilter
+    except ImportError as exc:
+        raise RuntimeError("OCR no disponible. Instala pytesseract.") from exc
+    image = Image.open(io.BytesIO(raw_bytes)).convert("L")
+    image = ImageOps.autocontrast(image)
+    image = image.resize((image.width * 2, image.height * 2))
+    image = ImageEnhance.Sharpness(image).enhance(1.6)
+    image = image.filter(ImageFilter.SHARPEN)
+    try:
+        return pytesseract.image_to_string(image, lang="spa+eng", config="--psm 6")
+    except Exception:
+        try:
+            return pytesseract.image_to_string(image, lang="eng", config="--psm 6")
+        except Exception as exc:
+            raise RuntimeError(f"No se pudo ejecutar OCR: {exc}") from exc
+
+
+def _sheet_rows_to_points(rows: list[dict], fieldnames: list[str], source: str) -> list[CoordinatePoint]:
+    e_col = _coordinate_column(fieldnames, ["e", "este", "x", "coordenada x", "east", "easting", "este (e)"])
+    n_col = _coordinate_column(fieldnames, ["n", "norte", "y", "coordenada y", "north", "northing", "norte (n)"])
+    name_col = _coordinate_column(fieldnames, ["nombre", "punto", "point", "id", "codigo", "codigo punto", "vertice"])
+    if not e_col or not n_col:
+        raise ValueError(f"{source}: no se encontraron columnas Este/E y Norte/N (o X/Y).")
+    out: list[CoordinatePoint] = []
+    for idx, row in enumerate(rows, start=1):
+        e_raw, n_raw = row.get(e_col), row.get(n_col)
+        if e_raw in (None, "") or n_raw in (None, ""):
+            continue
+        try:
+            e = _parse_flexible_number(e_raw)
+            n = _parse_flexible_number(n_raw)
+        except Exception as exc:
+            raise ValueError(f"{source}: coordenada inválida en fila {idx}.") from exc
+        out.append(CoordinatePoint(e=e, n=n, name=str(row.get(name_col)).strip() if name_col and row.get(name_col) not in (None, "") else None, source=source))
+    if not out:
+        raise ValueError(f"{source}: no se encontraron coordenadas válidas.")
+    return out
+
+
 def read_coordinate_points(raw_bytes: bytes, filename: str = "coordenadas.csv") -> list[CoordinatePoint]:
     """Read plan coordinates from CSV or Excel. Expected E/N; name is optional."""
     suffix = Path(filename).suffix.casefold()
     rows: list[dict] = []
-
     if suffix in {".xlsx", ".xlsm", ".xltx", ".xltm"}:
         try:
             from openpyxl import load_workbook
@@ -747,165 +898,324 @@ def read_coordinate_points(raw_bytes: bytes, filename: str = "coordenadas.csv") 
             raise ValueError("El Excel no contiene encabezados.") from exc
         for values in iterator:
             rows.append({headers[i]: values[i] if i < len(values) else None for i in range(len(headers))})
-    else:
-        encoding = _detect_encoding(raw_bytes)
-        text = raw_bytes.decode(encoding)
-        delimiter = _detect_delimiter(text)
-        reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=delimiter)
-        if not reader.fieldnames:
-            raise ValueError("El archivo de coordenadas no tiene encabezados.")
-        rows = list(reader)
+        return _sheet_rows_to_points(rows, headers, filename)
 
-    if not rows:
-        raise ValueError("El archivo de coordenadas no contiene filas.")
+    encoding = _detect_encoding(raw_bytes)
+    text = raw_bytes.decode(encoding)
+    delimiter = _detect_delimiter(text)
+    reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=delimiter)
+    if not reader.fieldnames:
+        raise ValueError(f"{filename}: el archivo no tiene encabezados.")
+    return _sheet_rows_to_points(list(reader), list(reader.fieldnames), filename)
 
-    fieldnames = list(rows[0].keys())
-    e_col = _coordinate_column(fieldnames, ["e", "este", "x", "coordenada x", "east", "eastings"])
-    n_col = _coordinate_column(fieldnames, ["n", "norte", "y", "coordenada y", "north", "northings"])
-    name_col = _coordinate_column(fieldnames, ["nombre", "punto", "point", "id", "codigo punto"])
-    if not e_col or not n_col:
-        raise ValueError("No se encontraron las columnas Este/E y Norte/N. El archivo debe contener E/N o X/Y.")
 
-    points: list[CoordinatePoint] = []
-    for idx, row in enumerate(rows, start=1):
-        e_raw = row.get(e_col)
-        n_raw = row.get(n_col)
-        if e_raw is None or n_raw is None or str(e_raw).strip() == "" or str(n_raw).strip() == "":
-            continue
+def _detect_zone_from_text(text: str) -> Optional[int]:
+    patterns = [
+        r"WGS84[_\s-]*UTM[_\s-]*(\d{1,2})\s*[NS]", r"\bzona\s*(?:utm)?\s*[:\-]?\s*(\d{1,2})\b", r"UTM\s*(?:zona)?\s*(\d{1,2})"
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.I)
+        if m:
+            z = int(m.group(1))
+            if 1 <= z <= 60:
+                return z
+    return None
+
+
+def extract_coordinate_sources(sources: list[tuple[str, bytes]]) -> tuple[list[CoordinatePoint], list[dict[str, str]]]:
+    """Read multiple coordinate sources: CSV/XLSX, PDF/DOCX and images with OCR."""
+    all_points: list[CoordinatePoint] = []
+    diagnostics: list[dict[str, str]] = []
+    for filename, raw in sources:
+        suffix = Path(filename).suffix.casefold()
         try:
-            e = float(str(e_raw).replace(",", "").strip())
-            n = float(str(n_raw).replace(",", "").strip())
-        except ValueError as exc:
-            raise ValueError(f"Coordenada inválida en la fila {idx}: E={e_raw!r}, N={n_raw!r}") from exc
-        name = str(row.get(name_col)).strip() if name_col and row.get(name_col) not in (None, "") else None
-        points.append(CoordinatePoint(e=e, n=n, name=name))
+            if suffix in {".csv", ".xlsx", ".xlsm", ".xltx", ".xltm"}:
+                pts = read_coordinate_points(raw, filename)
+                zone = None
+                for p in pts:
+                    p.zone = zone
+                all_points.extend(pts)
+                diagnostics.append({"archivo": filename, "resultado": f"{len(pts)} coordenada(s) leída(s)", "método": "Tabla"})
+                continue
 
-    if not points:
-        raise ValueError("No se encontraron coordenadas válidas E/N.")
-    return points
+            if suffix == ".pdf":
+                zone = None
+                try:
+                    report = parse_report_pdfs([(filename, raw)])
+                except Exception:
+                    report = None
+                if report and report.mobile_e is not None and report.mobile_n is not None:
+                    point = CoordinatePoint(
+                        report.mobile_e, report.mobile_n,
+                        name=report.point_code or Path(filename).stem,
+                        source=filename,
+                        zone=int(report.utm_zone) if report.utm_zone and report.utm_zone.isdigit() else None,
+                    )
+                    all_points.append(point)
+                    diagnostics.append({"archivo": filename, "resultado": "1 coordenada móvil Leica", "método": "Leica/PDF"})
+                    continue
+                text = _extract_text_from_pdf(raw)
+                zone = _detect_zone_from_text(text)
+                pts = _extract_utm_pairs_from_text(text)
+                for p in pts:
+                    p.source = filename
+                    p.zone = zone
+                    p.name = Path(filename).stem
+                if pts:
+                    all_points.extend(pts)
+                    diagnostics.append({"archivo": filename, "resultado": f"{len(pts)} coordenada(s) leída(s)", "método": "PDF/texto"})
+                    continue
+                raise ValueError("No se encontraron pares UTM en el texto del PDF.")
+
+            if suffix == ".docx":
+                text = _extract_text_from_docx(raw)
+                zone = _detect_zone_from_text(text)
+                pts = _extract_utm_pairs_from_text(text)
+                for p in pts:
+                    p.source = filename; p.zone = zone; p.name = Path(filename).stem
+                if not pts:
+                    raise ValueError("No se encontraron pares UTM en el DOCX.")
+                all_points.extend(pts)
+                diagnostics.append({"archivo": filename, "resultado": f"{len(pts)} coordenada(s) leída(s)", "método": "DOCX/texto"})
+                continue
+
+            if suffix in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp"}:
+                text = _ocr_image(raw)
+                zone = _detect_zone_from_text(text)
+                pts = _extract_utm_pairs_from_text(text)
+                for p in pts:
+                    p.source = filename; p.zone = zone; p.name = Path(filename).stem
+                if not pts:
+                    raise ValueError("OCR ejecutado, pero no se encontraron pares UTM.")
+                all_points.extend(pts)
+                diagnostics.append({"archivo": filename, "resultado": f"{len(pts)} coordenada(s) OCR", "método": "OCR"})
+                continue
+
+            raise ValueError("Tipo de archivo no soportado.")
+        except Exception as exc:
+            diagnostics.append({"archivo": filename, "resultado": f"ERROR: {exc}", "método": "—"})
+
+    if not all_points:
+        raise ValueError("No se pudo extraer ninguna coordenada. Revisa los formatos o ingrésalas en CSV/Excel.")
+    return all_points, diagnostics
+
+
+def _serialize_rows(rows: list[dict[str, str]], fieldnames: list[str], encoding: str = "utf-8-sig", delimiter: str = ",") -> bytes:
+    out = io.StringIO(newline="")
+    writer = csv.DictWriter(out, fieldnames=fieldnames, delimiter=delimiter, lineterminator="\r\n", extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({c: row.get(c, "") for c in fieldnames})
+    return out.getvalue().encode(encoding)
+
+
+def _normalize_rows(rows: list[dict[str, str]], base_name: str | None = None, start_number: int = 1) -> list[dict[str, str]]:
+    if not rows:
+        return []
+    out = [dict(rows[0])]
+    base = base_name or (rows[0].get("Nombre") or "").strip()
+    seq = start_number
+    for row in rows[1:]:
+        new = dict(row)
+        new["Nombre"] = str(seq)
+        if "Base" in new:
+            new["Base"] = base
+        if "Número de Observación" in new:
+            new["Número de Observación"] = OBSERVATION_VALUE
+        if "Método de encuesta" in new:
+            new["Método de encuesta"] = "Topográfico"
+        out.append(new)
+        seq += 1
+    return out
+
+
+def native_updated(csv_info: CSVInfo) -> tuple[bytes, list[dict[str, str]]]:
+    rows = _normalize_rows(csv_info.rows, csv_info.base_name)
+    return _serialize_rows(rows, csv_info.fieldnames, csv_info.encoding, csv_info.delimiter), rows
+
+
+def apply_correction(
+    csv_info: CSVInfo,
+    corrected_e: float,
+    corrected_n: float,
+    corrected_h: float,
+) -> tuple[bytes, bytes, dict]:
+    """Apply one translation and then normalize point sequence/observation metadata."""
+    de = Decimal(str(corrected_e)) - Decimal(str(csv_info.base_original_e))
+    dn = Decimal(str(corrected_n)) - Decimal(str(csv_info.base_original_n))
+    dh = Decimal(str(corrected_h)) - Decimal(str(csv_info.base_original_h))
+
+    corrected_rows_raw: list[dict[str, str]] = []
+    for idx, row in enumerate(csv_info.rows):
+        new = dict(row)
+        old_e = _decimal(row["e"]); old_n = _decimal(row["n"]); old_h = _decimal(row["h"])
+        if idx == 0:
+            new["e"] = _format_decimal(Decimal(str(corrected_e)), 4)
+            new["n"] = _format_decimal(Decimal(str(corrected_n)), 4)
+            new["h"] = _format_decimal(Decimal(str(corrected_h)), 4)
+        else:
+            new["e"] = _format_decimal(old_e + de, 4)
+            new["n"] = _format_decimal(old_n + dn, 4)
+            new["h"] = _format_decimal(old_h + dh, 4)
+            new["Base"] = csv_info.base_name
+        corrected_rows_raw.append(new)
+
+    corrected_rows = _normalize_rows(corrected_rows_raw, csv_info.base_name)
+    corrected_bytes = _serialize_rows(corrected_rows, csv_info.fieldnames, csv_info.encoding, csv_info.delimiter)
+
+    poly_fields = [c for c in ["Nombre", "e", "n", "h", "Código"] if c in csv_info.fieldnames]
+    polygon_bytes = _serialize_rows(corrected_rows, poly_fields, csv_info.encoding, csv_info.delimiter)
+
+    return corrected_bytes, polygon_bytes, {
+        "delta_e": float(de),
+        "delta_n": float(dn),
+        "delta_h": float(dh),
+        "corrected_rows": corrected_rows,
+        "fieldnames": list(csv_info.fieldnames),
+        "encoding": csv_info.encoding,
+        "delimiter": csv_info.delimiter,
+    }
 
 
 def _xy_distance(a_e: float, a_n: float, b_e: float, b_n: float) -> float:
     return ((a_e - b_e) ** 2 + (a_n - b_n) ** 2) ** 0.5
 
 
-def _idw_height(native_rows: list[dict[str, str]], target_e: float, target_n: float, k: int = 4) -> tuple[float, list[float]]:
+def _idw_height(native_rows: list[dict[str, str]], target_e: float, target_n: float, k: int = 6) -> tuple[float, list[float], str]:
     candidates = []
+    seen = set()
     for row in native_rows:
         try:
-            e = float(_decimal(row["e"]))
-            n = float(_decimal(row["n"]))
-            h = float(_decimal(row["h"]))
+            e = float(_decimal(row["e"])); n = float(_decimal(row["n"])); h = float(_decimal(row["h"]))
         except Exception:
             continue
+        key = (round(e, 6), round(n, 6))
+        if key in seen:
+            continue
+        seen.add(key)
         d = _xy_distance(target_e, target_n, e, n)
         candidates.append((d, h))
     if not candidates:
         raise ValueError("La data nativa no tiene alturas válidas para interpolar.")
     candidates.sort(key=lambda x: x[0])
     nearest = candidates[: max(1, min(k, len(candidates)))]
-    if nearest[0][0] == 0:
-        return nearest[0][1], [nearest[0][0]]
+    if nearest[0][0] <= 1e-9:
+        return nearest[0][1], [nearest[0][0]], "Coincidencia exacta"
     weights = [1.0 / max(d, 1e-9) ** 2 for d, _ in nearest]
     h = sum(w * val for w, (_, val) in zip(weights, nearest)) / sum(weights)
-    return h, [d for d, _ in nearest]
+    return h, [d for d, _ in nearest], "IDW fallback"
 
 
-def _copy_value_from_nearest(row: dict[str, str], column: str, fallback: str = "") -> str:
-    value = row.get(column)
-    return fallback if value is None else str(value)
+def _tin_height(native_rows: list[dict[str, str]], target_e: float, target_n: float) -> tuple[float, list[float], str] | None:
+    """Piecewise-linear terrain surface over a Delaunay TIN; return None outside hull."""
+    try:
+        import numpy as np
+        from scipy.spatial import Delaunay
+    except Exception:
+        return None
+    pts = []
+    seen = set()
+    for row in native_rows:
+        try:
+            e = float(_decimal(row["e"])); n = float(_decimal(row["n"])); h = float(_decimal(row["h"]))
+        except Exception:
+            continue
+        key = (round(e, 6), round(n, 6))
+        if key in seen:
+            continue
+        seen.add(key); pts.append((e, n, h))
+    if len(pts) < 3:
+        return None
+    xy = np.array([[p[0], p[1]] for p in pts], dtype=float)
+    z = np.array([p[2] for p in pts], dtype=float)
+    try:
+        tri = Delaunay(xy)
+        simplex = int(tri.find_simplex(np.array([[target_e, target_n]], dtype=float))[0])
+        if simplex < 0:
+            return None
+        transform = tri.transform[simplex]
+        delta = np.array([target_e, target_n]) - transform[2]
+        bary = np.dot(transform[:2], delta)
+        weights = np.r_[bary, 1 - bary.sum()]
+        verts = tri.simplices[simplex]
+        h = float(np.dot(weights, z[verts]))
+        distances = [math.hypot(target_e - xy[i, 0], target_n - xy[i, 1]) for i in verts]
+        return h, distances, "TIN lineal"
+    except Exception:
+        return None
 
 
 def generate_derived_data(
     csv_info: CSVInfo,
     plan_points: list[CoordinatePoint],
-    match_tolerance_m: float = 0.01,
-    idw_neighbors: int = 4,
+    match_tolerance_m: float = 0.0,
+    idw_neighbors: int = 6,
 ) -> tuple[bytes, dict]:
-    """Create a derived GNSS-style CSV from plan E/N points.
+    """Generate a coherent derived dataset with base first and sequential points.
 
-    Matching points keep their native row. New points use the nearest native row as
-    metadata template, interpolate H with IDW, and retain the plan E/N.
+    Heights use a Delaunay TIN and barycentric linear interpolation when the target
+    falls inside the native convex hull; outside it, the method falls back to IDW.
     """
     if match_tolerance_m < 0:
         raise ValueError("La tolerancia no puede ser negativa.")
-    native = csv_info.rows
-    if not native:
+    if not csv_info.rows:
         raise ValueError("La data nativa está vacía.")
-
+    native = csv_info.rows
     native_xy = []
     for idx, row in enumerate(native):
         try:
-            e = float(_decimal(row["e"]))
-            n = float(_decimal(row["n"]))
+            e = float(_decimal(row["e"])); n = float(_decimal(row["n"]))
         except Exception:
             continue
         native_xy.append((idx, e, n))
+    if not native_xy:
+        raise ValueError("La data nativa no tiene coordenadas E/N válidas.")
 
-    output_rows: list[dict[str, str]] = []
-    matched = 0
-    generated = 0
-    distances: list[float] = []
-    generated_points: list[dict] = []
-
-    # For generated names when the plan file has no name column.
-    new_counter = 1
+    output_rows: list[dict[str, str]] = [dict(native[0])]
+    matched = 0; generated = 0; distances: list[float] = []; generated_points: list[dict] = []
 
     for point in plan_points:
-        nearest_idx, nearest_e, nearest_n = min(
-            native_xy,
-            key=lambda item: _xy_distance(point.e, point.n, item[1], item[2]),
-        )
+        # If the source itself labels the coordinate as the project base, keep the
+        # native base row as the single authoritative base instead of generating a
+        # second point from the plan coordinate.
+        if point.name and point.name.strip().casefold() == csv_info.base_name.strip().casefold():
+            matched += 1
+            continue
+        nearest_idx, nearest_e, nearest_n = min(native_xy, key=lambda item: _xy_distance(point.e, point.n, item[1], item[2]))
         distance = _xy_distance(point.e, point.n, nearest_e, nearest_n)
         distances.append(distance)
-
         if distance <= match_tolerance_m:
-            row = dict(native[nearest_idx])
-            # Preserve the native coordinates for a true match.
-            matched += 1
-            output_rows.append(row)
+            if nearest_idx == 0:
+                matched += 1
+                continue  # base is already present exactly once
+            output_rows.append(dict(native[nearest_idx])); matched += 1
             continue
 
         template = dict(native[nearest_idx])
-        h, interpolation_distances = _idw_height(native, point.e, point.n, k=idw_neighbors)
-        new_name = point.name or f"P{new_counter:03d}"
-        if not point.name:
-            new_counter += 1
-
-        template["Nombre"] = new_name
+        tin = _tin_height(native, point.e, point.n)
+        if tin is None:
+            h, interpolation_distances, method = _idw_height(native, point.e, point.n, k=idw_neighbors)
+        else:
+            h, interpolation_distances, method = tin
         template["e"] = _format_decimal(Decimal(str(point.e)), 4)
         template["n"] = _format_decimal(Decimal(str(point.n)), 4)
         template["h"] = _format_decimal(Decimal(str(h)), 4)
-        # Keep nearest code, including blank code if the nearest point is blank.
-        template["Código"] = _copy_value_from_nearest(native[nearest_idx], "Código", "")
-        # Base and observation metadata remain coherent with the native dataset.
-        template["Base"] = _copy_value_from_nearest(native[nearest_idx], "Base", csv_info.base_name)
+        template["Base"] = csv_info.base_name
         template["Número de Observación"] = OBSERVATION_VALUE
+        template["Método de encuesta"] = "Topográfico"
         generated += 1
         generated_points.append({
-            "nombre": new_name,
-            "e": point.e,
-            "n": point.n,
-            "h": h,
-            "distancia_vecino_m": distance,
-            "codigo": template.get("Código", ""),
+            "e": point.e, "n": point.n, "h": h, "distancia_vecino_m": distance,
+            "codigo": template.get("Código", ""), "metodo_h": method,
             "interpolacion_vecinos_m": interpolation_distances,
+            "fuente": point.source or "",
         })
         output_rows.append(template)
 
-    out = io.StringIO(newline="")
-    writer = csv.DictWriter(
-        out,
-        fieldnames=csv_info.fieldnames,
-        delimiter=csv_info.delimiter,
-        lineterminator="\r\n",
-        extrasaction="ignore",
-    )
-    writer.writeheader()
-    for row in output_rows:
-        writer.writerow({c: row.get(c, "") for c in csv_info.fieldnames})
-
-    return out.getvalue().encode(csv_info.encoding), {
+    output_rows = _normalize_rows(output_rows, csv_info.base_name)
+    out = _serialize_rows(output_rows, csv_info.fieldnames, csv_info.encoding, csv_info.delimiter)
+    methods = Counter(item["metodo_h"] for item in generated_points)
+    return out, {
         "input_points": len(plan_points),
         "matched_points": matched,
         "generated_points": generated,
@@ -914,12 +1224,106 @@ def generate_derived_data(
         "generated_detail": generated_points,
         "match_tolerance_m": match_tolerance_m,
         "idw_neighbors": idw_neighbors,
+        "interpolation_methods": dict(methods),
     }
 
 
-def generated_data_filename(original_name: str) -> str:
+def corrected_filename(original_name: str) -> str:
     p = Path(original_name)
-    stem = re.sub(r"nativo|nativa", "GENERADA", p.stem, flags=re.I)
+    stem = re.sub(r"nativo|nativa", "CORREGIDA", p.stem, flags=re.I)
     if stem == p.stem:
-        stem = f"{p.stem} GENERADA"
+        stem = f"{p.stem} CORREGIDA"
     return f"{stem}{p.suffix or '.csv'}"
+
+
+def native_updated_filename(original_name: str) -> str:
+    p = Path(original_name)
+    stem = re.sub(r"nativo|nativa", "NATIVA ACTUALIZADA", p.stem, flags=re.I)
+    if stem == p.stem:
+        stem = f"{p.stem} NATIVA ACTUALIZADA"
+    return f"{stem}{p.suffix or '.csv'}"
+
+
+def polygon_filename(original_name: str) -> str:
+    p = Path(original_name)
+    return f"{p.stem} POLIGONO{p.suffix or '.csv'}"
+
+
+def merged_filename(prefix: str, ext: str = ".csv") -> str:
+    return f"{prefix}{ext if ext.startswith('.') else '.' + ext}"
+
+
+def _csv_payload_rows(raw: bytes) -> tuple[list[dict[str, str]], list[str], str, str]:
+    encoding = _detect_encoding(raw)
+    text = raw.decode(encoding)
+    delimiter = _detect_delimiter(text)
+    reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=delimiter)
+    if not reader.fieldnames:
+        raise ValueError("CSV sin encabezados.")
+    return list(reader), list(reader.fieldnames), encoding, delimiter
+
+
+def merge_csv_payloads(payloads: list[bytes], *, require_same_base: bool = True) -> tuple[bytes, dict]:
+    if not payloads:
+        raise ValueError("No hay archivos para unir.")
+    datasets = [_csv_payload_rows(p) for p in payloads]
+    fieldnames: list[str] = []
+    for _, cols, _, _ in datasets:
+        for c in cols:
+            if c not in fieldnames:
+                fieldnames.append(c)
+    rows_sets = [ds[0] for ds in datasets]
+    base_names = [(rows[0].get("Nombre") or "").strip() for rows in rows_sets if rows]
+    if require_same_base and len({b.casefold() for b in base_names if b}) > 1:
+        raise ValueError("No se pueden unir archivos con bases diferentes. Primero normaliza/usa la misma base.")
+    if not rows_sets or not rows_sets[0]:
+        raise ValueError("El primer CSV no contiene filas.")
+    base_name = base_names[0]
+    merged_rows: list[dict[str, str]] = [dict(rows_sets[0][0])]
+    for rows in rows_sets:
+        merged_rows.extend(dict(r) for r in rows[1:])
+    merged_rows = _normalize_rows(merged_rows, base_name)
+    encoding, delimiter = datasets[0][2], datasets[0][3]
+    return _serialize_rows(merged_rows, fieldnames, encoding, delimiter), {
+        "rows": len(merged_rows), "base": base_name, "fieldnames": fieldnames,
+        "encoding": encoding, "delimiter": delimiter,
+    }
+
+
+def zip_artifacts(files: list[tuple[str, bytes]]) -> bytes:
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, payload in files:
+            z.writestr(name, payload)
+    return out.getvalue()
+
+
+def csv_point_quality_summary(csv_info: CSVInfo) -> dict:
+    rows = csv_info.rows[1:]
+
+    def values(col):
+        vals = []
+        for row in rows:
+            v = _float_or_none(row.get(col))
+            if v is not None:
+                vals.append(v)
+        return vals
+
+    def minmax(col):
+        vals = values(col)
+        return (min(vals), max(vals)) if vals else (None, None)
+
+    return {
+        "rms_error": minmax("RMS Error"),
+        "x_precision": minmax("X Precisión"),
+        "y_precision": minmax("Y Precisión"),
+        "horizontal_error": minmax("Horizontal Error"),
+        "vertical_error": minmax("Vertical Error"),
+        "pdop": minmax("PDOP"),
+        "hdop": minmax("HDOP"),
+        "vdop": minmax("VDOP"),
+    }
+
+
+def dataclass_dict(obj):
+    return asdict(obj)

@@ -1,64 +1,36 @@
-# CONPLANOS - Herramientas GNSS V5
+# CONPLANOS GNSS
 
-## Herramientas
-1. Corrector GNSS
-2. Generador de data
-3. Certificado de punto geodésico
+Aplicación Streamlit para apoyo al procesamiento y gestión de datos GNSS de CONPLANOS.
 
-## Cambio importante V5
-La comparación de antenas entre CSV y PDF ya **no se marca como error** automáticamente.
-La aplicación muestra por separado la antena de referencia y la antena móvil, porque que sean distintas puede ser completamente normal.
+## Módulos V9
 
-## Certificado de punto geodésico
-La herramienta acepta:
-- Informe Leica para extraer automáticamente Norte, Este, Zona, Latitud, Longitud, Altura Elipsoidal, estación GNSS y fecha de posicionamiento.
-- O ingreso manual de todos los campos.
+- **Corrector GNSS**: uno o varios CSV nativos, informes Leica, corrección de E/N/H, data nativa actualizada, data corregida, polígono, unión con una sola base y secuencia continua.
+- **Generador de data**: uno o varios CSV nativos; lectura de coordenadas desde CSV, Excel, PDF, DOCX e imágenes mediante OCR; tolerancia de coincidencia desde 0; altura mediante TIN lineal con IDW de respaldo; base única y secuencia continua.
+- **Certificados**: certificado desde el PUNTO MÓVIL Leica, descargas persistentes PDF/Word, historial y visor WGS84, Google Maps y registro de puntos externos. Si no se adjunta foto, usa la placa oficial de referencia CONPLANOS y reemplaza automáticamente el código y el año.
+- **Efemérides precisas**: productos finales para día anterior, día de lectura y día siguiente.
 
-Genera:
-- PDF de una página con el diseño base del certificado proporcionado.
-- Word editable basado en la plantilla proporcionada.
+## Estructura fija
 
-La fecha de emisión se completa con la fecha actual y puede editarse antes de generar.
+La aplicación mantiene nombres estables para facilitar reemplazos en GitHub:
 
-Si no se proporciona una foto de la placa, se genera una **ilustración** de placa con el código. Debe entenderse como un gráfico generado, no como una fotografía de una placa real.
+```text
+app.py
+core.py
+history.py
+certificate.py
+ephemeris.py
+requirements.txt
+.streamlit/config.toml
+templates/
+```
 
-El certificado mantiene la leyenda del formato proporcionado indicando que no constituye certificación oficial del IGN.
+Las siguientes versiones deben reemplazar los mismos nombres, no crear `app_v9.py`, `core_v9.py`, etc.
 
-## Publicación en Streamlit
-Subir al repositorio:
-- app.py
-- core.py
-- certificate.py
-- requirements.txt
-- README.md
-- .gitignore
-- .streamlit/config.toml
-- templates/certificado_punto_geodesico_template.docx
-- templates/certificate_background.png
-- templates/logo_ls.png
+## Seguridad
 
-Main file: app.py
+No publiques `secrets.toml`, claves privadas de Google ni el JSON real de la cuenta de servicio. Usa Streamlit Secrets.
 
-## Nota de privacidad
-No subir PDFs/CSV de clientes ni credenciales al repositorio.
-
-
-### V6 - Certificado de punto geodésico
-El certificado trabaja únicamente a partir del informe Leica de procesamiento del punto móvil.
-El usuario debe ingresar manualmente solo:
-- Código del punto geodésico.
-- Solicitante.
-
-El sistema extrae automáticamente del informe:
-- Norte
-- Este
-- Zona
-- Latitud
-- Longitud
-- Altura elipsoidal
-- Estación GNSS de referencia
-- Fecha de posicionamiento
-- Año
-
-La fecha de emisión se completa con la fecha actual.
-La foto de placa es opcional; si falta, se genera una ilustración de placa con el código.
+Consulta:
+- `ACTUALIZAR_GITHUB.md`
+- `GOOGLE_SHEETS_Y_LOGIN.md`
+- `STREAMLIT_SECRETS_EJEMPLO.toml`

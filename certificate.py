@@ -9,7 +9,7 @@ import io
 import zipfile
 import tempfile
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from lxml import etree
 
 
@@ -79,9 +79,121 @@ def extract_certificate_data(report, defaults: Optional[CertificateData] = None)
     return data
 
 
-def make_plaque(code: str, output_path: str | Path) -> Path:
-    """Genera una ilustración de placa cuando no se dispone de fotografía."""
+def make_plaque(
+    code: str,
+    output_path: str | Path,
+    template_path: str | Path | None = None,
+    year: str | int | None = None,
+) -> Path:
+    """
+    Genera una placa ilustrativa para el certificado cuando no se dispone
+    de una fotografía real.
+
+    V9:
+    - Usa la placa oficial de referencia entregada por CONPLANOS.
+    - Sustituye dinámicamente el código del punto y el año.
+    - Conserva el resto de la fotografía como plantilla visual.
+    """
     output_path = Path(output_path)
+    template_path = (
+        Path(template_path)
+        if template_path is not None
+        else Path(__file__).resolve().parent / "templates" / "plaque_generada_template.png"
+    )
+
+    year_text = str(year or date.today().year)
+    code_text = str(code or "").strip() or "PG-XXXX"
+
+    if template_path.exists():
+        img = Image.open(template_path).convert("RGB")
+        w, h = img.size
+        draw = ImageDraw.Draw(img)
+
+        # La placa entregada por CONPLANOS es una fotografía de referencia.
+        # Para que el código/año puedan cambiarse sin dejar el texto anterior,
+        # se limpian dos zonas interiores con parches suaves del mismo tono
+        # de la placa. A escala de certificado estas transiciones quedan
+        # discretas y no alteran el resto de la imagen.
+        def sample_rgb(points):
+            px = [img.getpixel((int(x), int(y))) for x, y in points]
+            return tuple(
+                int(sum(v[c] for v in px) / len(px))
+                for c in range(3)
+            )
+
+        plate_rgb = sample_rgb([
+            (665, 740), (1050, 1000), (665, 1180),
+            (880, 1180), (700, 1140), (940, 1140),
+        ])
+
+        patch = Image.new("RGB", (w, h), plate_rgb)
+        patch_draw = ImageDraw.Draw(patch)
+
+        # Zonas normalizadas sobre la plantilla 1314x1325.
+        sx, sy = w / 1314.0, h / 1325.0
+        code_area = (
+            int(250 * sx), int(755 * sy),
+            int(1070 * sx), int(955 * sy),
+        )
+        year_area = (
+            int(450 * sx), int(975 * sy),
+            int(880 * sx), int(1115 * sy),
+        )
+
+        # Óvalos amplios: eliminan por completo los números antiguos sin
+        # tapar los elementos superiores de la placa.
+        patch_draw.ellipse(code_area, fill=plate_rgb)
+        patch_draw.ellipse(year_area, fill=plate_rgb)
+
+        # Suaviza los bordes, manteniendo el centro completamente opaco
+        # para que nunca se vea el código/año original.
+        alpha = Image.new("L", (w, h), 0)
+        alpha_draw = ImageDraw.Draw(alpha)
+        alpha_draw.ellipse(code_area, fill=255)
+        alpha_draw.ellipse(year_area, fill=255)
+        alpha = alpha.filter(ImageFilter.GaussianBlur(radius=max(4, int(6 * min(sx, sy)))))
+        img = Image.composite(patch, img, alpha)
+        draw = ImageDraw.Draw(img)
+
+        candidates = [
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ]
+        font_file = next((f for f in candidates if Path(f).exists()), None)
+
+        def fit_font(text_value, region, max_size, min_size):
+            if not font_file:
+                return ImageFont.load_default()
+            max_width = int((region[2] - region[0]) * 0.86)
+            max_height = int((region[3] - region[1]) * 0.72)
+            for size in range(max_size, min_size - 1, -2):
+                font = ImageFont.truetype(font_file, size)
+                bbox = draw.textbbox((0, 0), text_value, font=font)
+                if (bbox[2] - bbox[0]) <= max_width and (bbox[3] - bbox[1]) <= max_height:
+                    return font
+            return ImageFont.truetype(font_file, min_size)
+
+        code_font = fit_font(code_text, code_area, 104, 56)
+        year_font = fit_font(year_text, year_area, 74, 44)
+
+        def centered(value, area, font):
+            cx = (area[0] + area[2]) / 2
+            cy = (area[1] + area[3]) / 2
+            draw.text(
+                (cx, cy),
+                value,
+                font=font,
+                fill=(18, 18, 18),
+                anchor="mm",
+            )
+
+        centered(code_text, code_area, code_font)
+        centered(year_text, year_area, year_font)
+
+        img.save(output_path, "PNG", optimize=True)
+        return output_path
+
+    # Fallback muy sencillo si la plantilla no estuviera disponible.
     size = 700
     img = Image.new("RGB", (size, size), (155, 75, 44))
     draw = ImageDraw.Draw(img)
@@ -93,17 +205,16 @@ def make_plaque(code: str, output_path: str | Path) -> Path:
     draw.ellipse((65, 65, 635, 635), fill=(233, 221, 164), outline=(70, 90, 110), width=9)
     draw.ellipse((98, 98, 602, 602), outline=(70, 90, 110), width=6)
 
-    def centered(text, y, font):
-        bbox = draw.textbbox((0, 0), text, font=font)
-        draw.text((cx - (bbox[2] - bbox[0]) / 2, y), text, fill=(55, 85, 105), font=font)
+    def centered_legacy(text_value, y, font):
+        bbox = draw.textbbox((0, 0), text_value, font=font)
+        draw.text((cx - (bbox[2] - bbox[0]) / 2, y), text_value, fill=(55, 85, 105), font=font)
 
-    centered("PUNTO GEODÉSICO", 105, small)
-    centered("CONPLANOS", 205, bold)
-    centered(code or "PG-XXXX", 310, bold)
-    centered("GENERADO", 535, small)
+    centered_legacy("PUNTO GEODÉSICO", 105, small)
+    centered_legacy("CONPLANOS", 205, bold)
+    centered_legacy(code_text, 310, bold)
+    centered_legacy(year_text, 535, small)
     img.save(output_path, "PNG", optimize=True)
     return output_path
-
 
 def _fill_text_node(tree, token_map):
     """Replace whole placeholder tokens in a Word document XML tree."""

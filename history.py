@@ -11,7 +11,12 @@ HEADERS = [
     "fecha_posicion", "fecha_emision", "anio", "tipo_orden", "correlativo",
     "solucion", "duracion_lectura", "distancia_m", "cq1d_m", "cq2d_m",
     "cq3d_m", "m0_m", "receptor_movil", "antena_movil", "altura_antena_movil",
-    "informe_leica", "certificado_pdf", "certificado_word",
+    "informe_leica", "certificado_pdf", "certificado_word", "origen",
+]
+
+EXTERNAL_HEADERS = [
+    "fecha_registro", "codigo", "nombre", "norte", "este", "zona",
+    "latitud", "longitud", "altura", "fuente", "tipo", "observacion",
 ]
 
 
@@ -29,45 +34,81 @@ def configured() -> bool:
     return bool(sheet_id and account)
 
 
-def _worksheet():
+def _client_and_sheet():
     import gspread
     from google.oauth2.service_account import Credentials
 
     sheet_id, account = _get_config()
     if not sheet_id or not account:
         raise RuntimeError("Google Sheets aún no está configurado en Streamlit Secrets.")
-
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive.readonly",
-    ]
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = Credentials.from_service_account_info(dict(account), scopes=scopes)
     client = gspread.authorize(creds)
-    sh = client.open_by_key(sheet_id)
-    try:
-        ws = sh.worksheet("Puntos")
-    except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title="Puntos", rows=1000, cols=len(HEADERS))
+    return client, client.open_by_key(sheet_id)
+
+
+def _ensure_headers(ws, headers):
     values = ws.get_all_values()
     if not values:
-        ws.append_row(HEADERS)
-    elif values[0][:len(HEADERS)] != HEADERS:
-        # Only add headers to a completely empty sheet; never overwrite user data.
-        if not any(values[0]):
-            ws.update("A1", [HEADERS])
+        if ws.col_count < len(headers):
+            ws.resize(cols=len(headers))
+        ws.append_row(headers)
+        return
+    current = list(values[0])
+    # Backward compatible: keep existing columns, append any new V8 fields.
+    for header in headers:
+        if header not in current:
+            current.append(header)
+            if ws.col_count < len(current):
+                ws.resize(cols=len(current))
+            ws.update_cell(1, len(current), header)
+
+
+def _worksheet():
+    _, sh = _client_and_sheet()
+    try:
+        ws = sh.worksheet("Puntos")
+    except Exception:
+        ws = sh.add_worksheet(title="Puntos", rows=1000, cols=max(30, len(HEADERS)))
+    _ensure_headers(ws, HEADERS)
+    return ws
+
+
+def _external_worksheet():
+    _, sh = _client_and_sheet()
+    try:
+        ws = sh.worksheet("OtrosPuntos")
+    except Exception:
+        ws = sh.add_worksheet(title="OtrosPuntos", rows=1000, cols=len(EXTERNAL_HEADERS))
+    _ensure_headers(ws, EXTERNAL_HEADERS)
     return ws
 
 
 def append_point(record: dict[str, Any]) -> None:
     ws = _worksheet()
-    row = [record.get(h, "") for h in HEADERS]
+    # Respect the sheet's current header order to remain compatible with V7.
+    headers = ws.row_values(1)
+    row = [record.get(h, "") for h in headers]
     ws.append_row(row, value_input_option="USER_ENTERED")
 
 
 def load_points() -> list[dict[str, str]]:
     ws = _worksheet()
-    rows = ws.get_all_records()
-    return [dict(r) for r in rows]
+    return [dict(r) for r in ws.get_all_records()]
+
+
+def append_external_points(records: list[dict[str, Any]]) -> None:
+    if not records:
+        return
+    ws = _external_worksheet()
+    headers = ws.row_values(1)
+    rows = [[r.get(h, "") for h in headers] for r in records]
+    ws.append_rows(rows, value_input_option="USER_ENTERED")
+
+
+def load_external_points() -> list[dict[str, str]]:
+    ws = _external_worksheet()
+    return [dict(r) for r in ws.get_all_records()]
 
 
 def make_record(data, report, report_filename: str, pdf_name: str = "", word_name: str = "") -> dict[str, Any]:
@@ -101,7 +142,26 @@ def make_record(data, report, report_filename: str, pdf_name: str = "", word_nam
         "informe_leica": report_filename,
         "certificado_pdf": pdf_name,
         "certificado_word": word_name,
+        "origen": "Certificado CONPLANOS",
     }
+
+
+def make_external_record(*, codigo: str, nombre: str, norte: float, este: float, zona: str, latitud: float, longitud: float, altura: str = "", fuente: str = "", observacion: str = "") -> dict[str, Any]:
+    return {
+        "fecha_registro": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+        "codigo": codigo,
+        "nombre": nombre,
+        "norte": norte,
+        "este": este,
+        "zona": zona,
+        "latitud": latitud,
+        "longitud": longitud,
+        "altura": altura,
+        "fuente": fuente,
+        "tipo": "Punto externo",
+        "observacion": observacion,
+    }
+
 
 def dms_to_decimal(value: str) -> float | None:
     """Convert Leica DMS text such as 13° 40' 51.24909'' S to decimal degrees."""
