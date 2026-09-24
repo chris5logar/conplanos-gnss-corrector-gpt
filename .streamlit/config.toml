@@ -1,9 +1,26 @@
 [theme]
 primaryColor = "#0f766e"
+font = "sans serif"
+
+[theme.light]
 backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#f3f4f6"
 textColor = "#111827"
-font = "sans serif"
+
+[theme.dark]
+backgroundColor = "#0f1419"
+secondaryBackgroundColor = "#1a222b"
+textColor = "#f3f4f6"
+
+[theme.light.sidebar]
+backgroundColor = "#f5f6f8"
+secondaryBackgroundColor = "#eef1f4"
+textColor = "#111827"
+
+[theme.dark.sidebar]
+backgroundColor = "#10161d"
+secondaryBackgroundColor = "#182029"
+textColor = "#f3f4f6"
 
 [server]
 headless = true
