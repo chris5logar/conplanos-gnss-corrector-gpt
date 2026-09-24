@@ -126,29 +126,44 @@ def _final_candidates_for_day(d: date) -> list[EphCandidate]:
     return out
 
 
-def _rapid_candidate(d: date) -> EphCandidate:
+def _rapid_candidates_for_day(d: date) -> list[EphCandidate]:
+    """Return Rapid orbit candidates from public/official sources.
+
+    ESA publishes its IGS Analysis Center Rapid orbit directly from its public
+    GNSS products service, while the IGS combined Rapid product is archived at
+    CDDIS.  We check both instead of relying only on the combined CDDIS file.
+    """
     w = gps_week(d)
     stamp = f"{d.year:04d}{doy(d):03d}0000"
-    name = f"IGS0OPSRAP_{stamp}_01D_15M_ORB.SP3.gz"
-    url = f"https://cddis.nasa.gov/archive/gnss/products/{w}/{name}"
-    return EphCandidate(d, "IGS", "IGS Rapid combinado · 15 min", name, url, "15 min", "GPS", "Rapid", 30)
+    esa_name = f"ESA0OPSRAP_{stamp}_01D_15M_ORB.SP3.gz"
+    esa_url = f"https://navigation-office.esa.int/products/gnss-products/{w}/{esa_name}"
+    igs_name = f"IGS0OPSRAP_{stamp}_01D_15M_ORB.SP3.gz"
+    igs_url = f"https://cddis.nasa.gov/archive/gnss/products/{w}/{igs_name}"
+    return [
+        EphCandidate(d, "ESA", "ESA Rapid · 15 min", esa_name, esa_url, "15 min", "GPS/Galileo/GLONASS", "Rapid", 30),
+        EphCandidate(d, "IGS", "IGS Rapid combinado · 15 min", igs_name, igs_url, "15 min", "GPS", "Rapid", 31),
+    ]
 
 
-def _ultra_starts_around_now() -> list[datetime]:
-    now = now_utc()
-    base_hour = (now.hour // 6) * 6
-    base = datetime.combine(now.date(), time(base_hour, tzinfo=UTC))
-    # Search recent releases first. The newest available file that covers the
-    # requested date is the most relevant ultra-rapid product.
-    return [base - timedelta(hours=6 * i) for i in range(0, 10)]
+def _ultra_starts_for_target(target: date) -> list[datetime]:
+    """Generate 6-hour Ultra-Rapid release epochs that can cover target.
+
+    The previous implementation searched only around *today*. That made a
+    historical request such as 20/09/2026 fail on 24/09/2026 even though an
+    archived Ultra-Rapid product for 20/09 was available. Search around the
+    requested date instead.
+    """
+    target_start = datetime.combine(target, time(0, tzinfo=UTC))
+    # A 48-hour Ultra-Rapid file covers the target if its start is between
+    # target-48h and target+23h45. Include a small margin of releases.
+    return [target_start + timedelta(hours=6 * i) for i in range(-8, 5)]
 
 
-def _ultra_candidate_for_start(start: datetime, requested_day: date) -> EphCandidate:
+def _ultra_candidates_for_start(start: datetime, requested_day: date) -> list[EphCandidate]:
+    """Return ESA and IGS Ultra-Rapid candidates for one release epoch."""
     sdate = start.date()
     w = gps_week(sdate)
     stamp = f"{sdate.year:04d}{doy(sdate):03d}{start.hour:02d}00"
-    name = f"IGS0OPSULT_{stamp}_02D_15M_ORB.SP3.gz"
-    url = f"https://cddis.nasa.gov/archive/gnss/products/{w}/{name}"
     coverage_start = start
     coverage_end = start + timedelta(hours=48) - timedelta(minutes=15)
 
@@ -156,30 +171,24 @@ def _ultra_candidate_for_start(start: datetime, requested_day: date) -> EphCandi
     day_end = day_start + timedelta(days=1) - timedelta(minutes=15)
     overlap_start = max(coverage_start, day_start)
     overlap_end = min(coverage_end, day_end)
-
     if overlap_start > overlap_end:
-        note = "No cubre la fecha solicitada"
-    elif overlap_start >= coverage_start and overlap_end <= coverage_start + timedelta(hours=24):
+        return []
+
+    if overlap_start >= coverage_start and overlap_end <= coverage_start + timedelta(hours=24):
         note = "Cobertura observada para la fecha solicitada"
     elif overlap_start >= coverage_start + timedelta(hours=24):
         note = "Cobertura predicha para la fecha solicitada"
     else:
         note = "Cobertura mixta: observada + predicha"
 
-    return EphCandidate(
-        requested_day,
-        "IGS",
-        "IGS Ultra-Rapid · 15 min",
-        name,
-        url,
-        "15 min",
-        "GPS",
-        "Ultra-Rapid",
-        40,
-        coverage_start=coverage_start,
-        coverage_end=coverage_end,
-        note=note,
-    )
+    esa_name = f"ESA0OPSULT_{stamp}_02D_15M_ORB.SP3.gz"
+    esa_url = f"https://navigation-office.esa.int/products/gnss-products/{w}/{esa_name}"
+    igs_name = f"IGS0OPSULT_{stamp}_02D_15M_ORB.SP3.gz"
+    igs_url = f"https://cddis.nasa.gov/archive/gnss/products/{w}/{igs_name}"
+    return [
+        EphCandidate(requested_day, "ESA", "ESA Ultra-Rapid · 15 min", esa_name, esa_url, "15 min", "GPS/Galileo/GLONASS", "Ultra-Rapid", 40, coverage_start=coverage_start, coverage_end=coverage_end, note=note),
+        EphCandidate(requested_day, "IGS", "IGS Ultra-Rapid · 15 min", igs_name, igs_url, "15 min", "GPS", "Ultra-Rapid", 41, coverage_start=coverage_start, coverage_end=coverage_end, note=note),
+    ]
 
 
 def find_best_for_day(target: date, check: bool = True) -> tuple[EphCandidate | None, list[EphCandidate]]:
@@ -201,21 +210,29 @@ def find_best_for_day(target: date, check: bool = True) -> tuple[EphCandidate | 
         available_finals.sort(key=lambda p: p.priority)
         return available_finals[0], alternatives
 
-    # Rapid: exact day. The server check determines whether it has really been released.
-    rapid = _rapid_candidate(target)
+    # Rapid: check all official Rapid candidates for the exact requested day.
+    # If ESA is available it is preferred here because its public archive is
+    # directly downloadable; IGS combined remains a verified fallback.
+    rapids = _rapid_candidates_for_day(target)
     if check:
-        rapid.status = _url_status(rapid.url)
-    alternatives.append(rapid)
-    if rapid.status == "Disponible":
-        return rapid, alternatives
+        for p in rapids:
+            p.status = _url_status(p.url)
+    alternatives.extend(rapids)
+    available_rapids = [p for p in rapids if p.status == "Disponible"]
+    if available_rapids:
+        available_rapids.sort(key=lambda p: p.priority)
+        return available_rapids[0], alternatives
 
-    # Ultra-Rapid: find an actually available 48-hour file that covers the target day.
+    # Ultra-Rapid: search releases around the REQUESTED day, not around today.
+    # Each product contains 48 hours, so historical dates can be served from
+    # archived Ultra-Rapid files even several days after the observation.
     ultras: list[EphCandidate] = []
-    for start in _ultra_starts_around_now():
-        cand = _ultra_candidate_for_start(start, target)
-        day_start = datetime.combine(target, time(0, tzinfo=UTC))
-        day_end = day_start + timedelta(days=1) - timedelta(minutes=15)
-        if cand.coverage_start and cand.coverage_start <= day_end and cand.coverage_end and cand.coverage_end >= day_start:
+    seen_urls: set[str] = set()
+    for start in _ultra_starts_for_target(target):
+        for cand in _ultra_candidates_for_start(start, target):
+            if cand.url in seen_urls:
+                continue
+            seen_urls.add(cand.url)
             if check:
                 cand.status = _url_status(cand.url)
             ultras.append(cand)
@@ -223,7 +240,21 @@ def find_best_for_day(target: date, check: bool = True) -> tuple[EphCandidate | 
     alternatives.extend(ultras)
     available_ultras = [p for p in ultras if p.status == "Disponible"]
     if available_ultras:
-        available_ultras.sort(key=lambda p: p.coverage_start or datetime.min.replace(tzinfo=UTC), reverse=True)
+        # Prefer a file that covers the COMPLETE requested UTC day. If several
+        # do, use the newest release; within the same release prefer ESA over
+        # the CDDIS combined fallback. If no file covers the whole day, use the
+        # one with the greatest overlap and then the newest release.
+        day_start = datetime.combine(target, time(0, tzinfo=UTC))
+        day_end = day_start + timedelta(days=1) - timedelta(minutes=15)
+
+        def ultra_score(p: EphCandidate):
+            overlap_start = max(p.coverage_start or day_start, day_start)
+            overlap_end = min(p.coverage_end or day_end, day_end)
+            overlap_minutes = max(0.0, (overlap_end - overlap_start).total_seconds() / 60.0)
+            full_day = 1 if overlap_minutes >= (24 * 60 - 15) else 0
+            return (full_day, overlap_minutes, p.coverage_start or datetime.min.replace(tzinfo=UTC), -p.priority)
+
+        available_ultras.sort(key=ultra_score, reverse=True)
         return available_ultras[0], alternatives
 
     return None, alternatives
