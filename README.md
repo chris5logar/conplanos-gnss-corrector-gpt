@@ -38,3 +38,9 @@ Consulta:
 - `ACTUALIZAR_GITHUB.md`
 - `GOOGLE_SHEETS_Y_LOGIN.md`
 - `STREAMLIT_SECRETS_EJEMPLO.toml`
+
+
+### V10.1
+- Efemérides finales en tarjetas compactas de 3 días, con todos los productos disponibles en filas cortas y botón de descarga a la derecha.
+- Fecha y búsqueda en una sola línea para reducir espacio vertical.
+- Se eliminó el alto fijo que provocaba grandes espacios en blanco.

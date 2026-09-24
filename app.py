@@ -48,7 +48,7 @@ from certificate import (
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 LOGO_PATH = TEMPLATES_DIR / "logo_conplanos.png"
-VERSION = "10.0"
+VERSION = "10.1"
 
 st.set_page_config(
     page_title="CONPLANOS GNSS",
@@ -75,13 +75,23 @@ st.markdown(
       .brand-footer {margin-top:1.2rem;padding:.65rem .4rem;border-top:1px solid #e5e7eb;text-align:center;color:#6b7280;font-size:.72rem;}
       .brand-badge {border-radius:11px;overflow:hidden;border:1px solid #e5e7eb;margin:.2rem 0 .7rem 0;background:#111;}
       .download-head {font-size:.88rem;font-weight:750;margin-top:.8rem;margin-bottom:.35rem;}
-      .eph-day {border:1px solid #e5e7eb;border-radius:14px;padding:.55rem .65rem;background:#fff;min-height:320px;}
-      .eph-day-title {font-size:.93rem;font-weight:800;margin-bottom:.45rem;}
-      .eph-row {display:grid;grid-template-columns:1.15fr 1.8fr .55fr;gap:.35rem;align-items:center;border-top:1px solid #f1f5f9;padding:.42rem 0;}
-      .eph-src {font-size:.74rem;font-weight:700;color:#111827;}
-      .eph-file {font-size:.62rem;line-height:1.2;color:#6b7280;word-break:break-all;}
-      .eph-status {font-size:.61rem;color:#166534;}
+      .eph-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.65rem;margin-top:.55rem;}
+      .eph-card {border:1px solid #e5e7eb;border-radius:12px;background:#fff;padding:.55rem .62rem;box-shadow:0 1px 2px rgba(15,23,42,.03);}
+      .eph-card-head {display:flex;align-items:center;justify-content:space-between;gap:.45rem;padding-bottom:.35rem;border-bottom:1px solid #eef2f7;margin-bottom:.12rem;}
+      .eph-card-title {font-size:.84rem;font-weight:800;color:#111827;line-height:1.15;}
+      .eph-card-sub {font-size:.62rem;color:#6b7280;margin-top:.08rem;}
+      .eph-item {display:grid;grid-template-columns:72px minmax(0,1fr) 34px;gap:.42rem;align-items:center;padding:.42rem 0;border-bottom:1px solid #f1f5f9;}
+      .eph-item:last-child {border-bottom:0;}
+      .eph-badge {font-size:.69rem;font-weight:800;color:#111827;}
+      .eph-badge small {display:block;font-size:.58rem;font-weight:600;color:#6b7280;margin-top:.08rem;}
+      .eph-file {font-size:.60rem;line-height:1.15;color:#6b7280;word-break:break-word;}
+      .eph-ok {display:inline-block;margin-left:.25rem;width:7px;height:7px;border-radius:50%;background:#22c55e;vertical-align:middle;}
+      .eph-muted {font-size:.64rem;color:#9ca3af;padding:.35rem 0;}
+      .eph-more {font-size:.69rem;color:#0f766e;font-weight:700;margin-top:.35rem;line-height:1.25;}
+      .eph-download {display:inline-flex;align-items:center;justify-content:center;width:32px;height:28px;border:1px solid #dbe3ea;border-radius:8px;text-decoration:none;background:#f8fafc;color:#0f766e;font-size:.88rem;}
+      .eph-download:hover {background:#ecfdf5;border-color:#99f6e4;}
       .map-legend {font-size:.72rem;color:#4b5563;margin:.35rem 0 .55rem;}
+      @media (max-width: 900px) { .eph-grid {grid-template-columns:1fr;} }
     </style>
     """,
     unsafe_allow_html=True,
@@ -254,7 +264,7 @@ with st.sidebar:
     with st.expander("Versiones", expanded=False):
         st.markdown(
             """
-            **V10 · Visor UTM WGS84 + mapa profesional + efemérides compactas + corrección del error de historial.**
+            **V10.1 · Efemérides en vista compacta y profesional, sin espacios vacíos.**
 
             **V9.1 · Corrección de arranque + placa oficial CONPLANOS como respaldo + código y año dinámicos.**
 
@@ -279,7 +289,7 @@ with st.sidebar:
     if auth_is_configured() and getattr(st.user, "is_logged_in", False):
         st.caption(f"👤 {getattr(st.user, 'name', '') or getattr(st.user, 'email', '')}")
         st.button("Cerrar sesión", on_click=st.logout, use_container_width=True)
-    st.caption("CONPLANOS GNSS · versión 10.0")
+    st.caption("CONPLANOS GNSS · versión 10.1")
 
 st.markdown('<div class="app-title">🛰️ CONPLANOS - Herramientas GNSS</div>', unsafe_allow_html=True)
 
@@ -899,9 +909,15 @@ elif tool == "Certificados":
 # ========================================================
 elif tool == "Efemérides precisas":
     st.subheader("📡 Efemérides precisas")
-    st.caption("Tres jornadas · finales oficiales · vista compacta")
-    target = st.date_input("Fecha de lectura", value=date.today(), key="eph_date_v10", format="DD/MM/YYYY")
-    if st.button("🔎 BUSCAR EFEMÉRIDES FINALES", type="primary", use_container_width=True, key="search_eph_v10"):
+    st.caption("Finales oficiales · 1 día antes · día de lectura · 1 día después")
+
+    c_date, c_btn = st.columns([1.25, .75], vertical_alignment="bottom")
+    with c_date:
+        target = st.date_input("Fecha de lectura", value=date.today(), key="eph_date_v10", format="DD/MM/YYYY")
+    with c_btn:
+        search = st.button("🔎 BUSCAR EFEMÉRIDES", type="primary", use_container_width=True, key="search_eph_v10")
+
+    if search:
         with st.spinner("Comprobando disponibilidad de productos oficiales…"):
             products = find_products(target, check=True)
         st.session_state["eph_products_v10"] = group_by_day(products)
@@ -910,41 +926,40 @@ elif tool == "Efemérides precisas":
     grouped = st.session_state.get("eph_products_v10")
     eph_target = st.session_state.get("eph_target_v10", target)
     if grouped is not None:
-        st.markdown("**Prioridad:** ESA Final 5 min → IGS Final 15 min → otros centros Final 5 min.")
-        day_cols = st.columns(3)
-        for col, delta, label in zip(day_cols, (-1, 0, 1), ("DÍA ANTERIOR", "DÍA DE LECTURA", "DÍA SIGUIENTE")):
+        st.markdown('<div class="neutral" style="margin:.35rem 0 .55rem 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;"><b>Prioridad</b> · ESA Final 5 min <span style="color:#94a3b8">→</span> IGS Final 15 min <span style="color:#94a3b8">→</span> otras soluciones Final 5 min</div>', unsafe_allow_html=True)
+
+        cards = []
+        for delta, label in zip((-1, 0, 1), ("DÍA ANTERIOR", "DÍA DE LECTURA", "DÍA SIGUIENTE")):
             d = eph_target + timedelta(days=delta)
             day_products = grouped.get(d, [])
-            with col:
-                st.markdown(f'<div class="eph-day"><div class="eph-day-title">📅 {d.strftime("%d/%m/%Y")} · {label}</div>', unsafe_allow_html=True)
-                available = [p for p in day_products if p.status == "Disponible"]
-                principal = [p for p in available if p.label.startswith("ESA Final") or p.label.startswith("IGS Final")]
-                others = [p for p in available if p not in principal]
-                if not principal:
-                    st.markdown('<div class="tiny">Sin producto ESA/IGS disponible.</div>', unsafe_allow_html=True)
-                for p in principal:
-                    safe_label = p.label.replace(" Final", "")
-                    st.markdown('<div class="eph-row">', unsafe_allow_html=True)
-                    c1, c2, c3 = st.columns([1.05, 1.8, .55])
-                    c1.markdown(f'<div class="eph-src">🟢 {safe_label}<div class="eph-status">{p.sampling}</div></div>', unsafe_allow_html=True)
-                    c2.markdown(f'<div class="eph-file">{p.filename}</div>', unsafe_allow_html=True)
-                    c3.link_button("⬇️", p.url, use_container_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                if others:
-                    with st.expander(f"Otras soluciones · {len(others)}", expanded=False):
-                        for p in others:
-                            c1, c2, c3 = st.columns([1.05, 1.8, .55])
-                            c1.markdown(f'<div class="eph-src">🟢 {p.label.replace(" Final", "")}<div class="eph-status">{p.sampling}</div></div>', unsafe_allow_html=True)
-                            c2.markdown(f'<div class="eph-file">{p.filename}</div>', unsafe_allow_html=True)
-                            c3.link_button("⬇️", p.url, use_container_width=True)
-                missing = [p for p in day_products if p.source in {"ESA", "IGS"} and p.status != "Disponible"]
-                if missing:
-                    st.markdown('<div class="tiny">⚪ Algún producto principal no está disponible o requiere autenticación.</div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-        st.caption("Los productos ESA/IGS mostrados son archivos externos enlazados. CDDIS puede requerir autenticación Earthdata; ESA publica sus Final en su archivo oficial.")
+            available = [p for p in day_products if p.status == "Disponible"]
+            available = sorted(
+                available,
+                key=lambda prod: (0 if prod.source == "ESA" else 1 if prod.source == "IGS" else 2, prod.source),
+            )
+            rows = []
+            for prod in available:
+                source_name = prod.source
+                tone = "" if prod.source in {"ESA", "IGS"} else ' style="opacity:.82"'
+                rows.append(
+                    f'<div class="eph-item"{tone}><div class="eph-badge"><span class="eph-ok"></span> {source_name}'
+                    f'<small>{prod.sampling}</small></div>'
+                    f'<div class="eph-file" title="{prod.filename}">{prod.filename}</div>'
+                    f'<a class="eph-download" href="{prod.url}" target="_blank" rel="noopener noreferrer" aria-label="Descargar {prod.source}">⬇</a></div>'
+                )
+            if not rows:
+                rows.append('<div class="eph-muted">No hay productos disponibles para esta fecha.</div>')
+            status_line = f'{len(available)} disponibles' if available else 'Sin productos disponibles'
+            cards.append(
+                f'<div class="eph-card"><div class="eph-card-head"><div><div class="eph-card-title">📅 {d.strftime("%d/%m/%Y")}</div>'
+                f'<div class="eph-card-sub">{label} · {status_line}</div></div></div>'
+                + ''.join(rows) + '</div>'
+            )
+        st.markdown('<div class="eph-grid">' + ''.join(cards) + '</div>', unsafe_allow_html=True)
+        st.caption("Los enlaces abren directamente el producto oficial. CDDIS/IGS puede solicitar autenticación Earthdata en algunos casos.")
 
 # ------------------ Footer ------------------
 st.markdown(
-    '<div class="brand-footer">Creado por <b>Ing Chris</b> · <b>CONPLANOS</b> · 928 400 600 · Herramientas GNSS · v10.0</div>',
+    '<div class="brand-footer">Creado por <b>Ing Chris</b> · <b>CONPLANOS</b> · 928 400 600 · Herramientas GNSS · v10.1</div>',
     unsafe_allow_html=True,
 )

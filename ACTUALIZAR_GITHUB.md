@@ -31,3 +31,9 @@ No crees archivos `app_v10.py`, `core_v10.py`, etc. La estrategia es siempre man
 ### Historial permanente
 
 Configura Google Sheets siguiendo `GOOGLE_SHEETS_Y_LOGIN.md`.
+
+
+### V10.1
+- Efemérides finales en tarjetas compactas de 3 días, con todos los productos disponibles en filas cortas y botón de descarga a la derecha.
+- Fecha y búsqueda en una sola línea para reducir espacio vertical.
+- Se eliminó el alto fijo que provocaba grandes espacios en blanco.
