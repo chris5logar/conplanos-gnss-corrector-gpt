@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import math
 import re
@@ -26,7 +27,8 @@ from core import (
     read_csv,
     zip_artifacts,
 )
-from ephemeris import find_products, group_by_day
+from ephemeris import find_best_for_day, now_lima, now_utc, today_lima
+from drive import configured as drive_configured, upload_bytes as drive_upload_bytes
 from history import (
     append_external_points,
     append_point,
@@ -48,7 +50,7 @@ from certificate import (
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 LOGO_PATH = TEMPLATES_DIR / "logo_conplanos.png"
-VERSION = "10.1"
+VERSION = "10.3"
 
 st.set_page_config(
     page_title="CONPLANOS GNSS",
@@ -62,35 +64,39 @@ st.markdown(
     <style>
       .block-container {padding-top:.65rem;padding-bottom:.8rem;max-width:1540px;}
       .small {font-size:.78rem;line-height:1.38;}
-      .tiny {font-size:.68rem;line-height:1.25;color:#6b7280;}
-      .card {border:1px solid #e5e7eb;border-radius:14px;padding:.65rem .78rem;margin-bottom:.5rem;background:#fff;}
+      .tiny {font-size:.68rem;line-height:1.25;color:rgba(127,127,127,.92);}
+      .card {border:1px solid rgba(127,127,127,.22);border-radius:14px;padding:.65rem .78rem;margin-bottom:.5rem;background:var(--background-color);color:var(--text-color);}
       .card-title {font-size:.84rem;font-weight:750;margin-bottom:.28rem;}
-      .ok,.warn,.bad,.neutral {border-radius:9px;padding:.42rem .55rem;margin:.18rem 0;font-size:.75rem;line-height:1.3;}
-      .ok {color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;}
-      .warn {color:#92400e;background:#fffbeb;border:1px solid #fde68a;}
-      .bad {color:#991b1b;background:#fef2f2;border:1px solid #fecaca;}
-      .neutral {color:#374151;background:#f9fafb;border:1px solid #e5e7eb;}
-      .step {font-size:.70rem;color:#6b7280;margin-bottom:.08rem;text-transform:uppercase;letter-spacing:.035em;}
-      .app-title {font-size:1.64rem;font-weight:800;margin-bottom:.05rem;}
-      .brand-footer {margin-top:1.2rem;padding:.65rem .4rem;border-top:1px solid #e5e7eb;text-align:center;color:#6b7280;font-size:.72rem;}
-      .brand-badge {border-radius:11px;overflow:hidden;border:1px solid #e5e7eb;margin:.2rem 0 .7rem 0;background:#111;}
+      .ok,.warn,.bad,.neutral {border-radius:9px;padding:.42rem .55rem;margin:.18rem 0;font-size:.75rem;line-height:1.3;color:var(--text-color);}
+      .ok {background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.28);}
+      .warn {background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.28);}
+      .bad {background:rgba(239,68,68,.10);border:1px solid rgba(239,68,68,.28);}
+      .neutral {background:var(--secondary-background-color);border:1px solid rgba(127,127,127,.22);}
+      .step {font-size:.70rem;color:rgba(127,127,127,.92);margin-bottom:.08rem;text-transform:uppercase;letter-spacing:.035em;}
+      .app-title {font-size:1.64rem;font-weight:800;margin-bottom:.05rem;color:var(--text-color);}
+      .brand-footer {margin-top:1.2rem;padding:.65rem .4rem;border-top:1px solid rgba(127,127,127,.22);text-align:center;color:rgba(127,127,127,.92);font-size:.72rem;}
+      .brand-badge {border-radius:11px;overflow:hidden;border:1px solid rgba(127,127,127,.22);margin:.2rem 0 .7rem 0;background:#111;}
       .download-head {font-size:.88rem;font-weight:750;margin-top:.8rem;margin-bottom:.35rem;}
       .eph-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.65rem;margin-top:.55rem;}
-      .eph-card {border:1px solid #e5e7eb;border-radius:12px;background:#fff;padding:.55rem .62rem;box-shadow:0 1px 2px rgba(15,23,42,.03);}
-      .eph-card-head {display:flex;align-items:center;justify-content:space-between;gap:.45rem;padding-bottom:.35rem;border-bottom:1px solid #eef2f7;margin-bottom:.12rem;}
-      .eph-card-title {font-size:.84rem;font-weight:800;color:#111827;line-height:1.15;}
-      .eph-card-sub {font-size:.62rem;color:#6b7280;margin-top:.08rem;}
-      .eph-item {display:grid;grid-template-columns:72px minmax(0,1fr) 34px;gap:.42rem;align-items:center;padding:.42rem 0;border-bottom:1px solid #f1f5f9;}
+      .eph-card {border:1px solid rgba(127,127,127,.22);border-radius:12px;background:var(--background-color);padding:.55rem .62rem;box-shadow:0 1px 2px rgba(15,23,42,.05);color:var(--text-color);}
+      .eph-card-head {display:flex;align-items:center;justify-content:space-between;gap:.45rem;padding-bottom:.35rem;border-bottom:1px solid rgba(127,127,127,.16);margin-bottom:.12rem;}
+      .eph-card-title {font-size:.84rem;font-weight:800;color:var(--text-color);line-height:1.15;}
+      .eph-card-sub {font-size:.62rem;color:rgba(127,127,127,.92);margin-top:.08rem;}
+      .eph-item {display:grid;grid-template-columns:92px minmax(0,1fr) 34px;gap:.42rem;align-items:center;padding:.42rem 0;border-bottom:1px solid rgba(127,127,127,.12);}
       .eph-item:last-child {border-bottom:0;}
-      .eph-badge {font-size:.69rem;font-weight:800;color:#111827;}
-      .eph-badge small {display:block;font-size:.58rem;font-weight:600;color:#6b7280;margin-top:.08rem;}
-      .eph-file {font-size:.60rem;line-height:1.15;color:#6b7280;word-break:break-word;}
+      .eph-badge {font-size:.69rem;font-weight:800;color:var(--text-color);}
+      .eph-badge small {display:block;font-size:.58rem;font-weight:600;color:rgba(127,127,127,.92);margin-top:.08rem;}
+      .eph-file {font-size:.60rem;line-height:1.15;color:rgba(127,127,127,.92);word-break:break-word;}
       .eph-ok {display:inline-block;margin-left:.25rem;width:7px;height:7px;border-radius:50%;background:#22c55e;vertical-align:middle;}
-      .eph-muted {font-size:.64rem;color:#9ca3af;padding:.35rem 0;}
+      .eph-muted {font-size:.64rem;color:rgba(127,127,127,.92);padding:.35rem 0;}
       .eph-more {font-size:.69rem;color:#0f766e;font-weight:700;margin-top:.35rem;line-height:1.25;}
-      .eph-download {display:inline-flex;align-items:center;justify-content:center;width:32px;height:28px;border:1px solid #dbe3ea;border-radius:8px;text-decoration:none;background:#f8fafc;color:#0f766e;font-size:.88rem;}
-      .eph-download:hover {background:#ecfdf5;border-color:#99f6e4;}
-      .map-legend {font-size:.72rem;color:#4b5563;margin:.35rem 0 .55rem;}
+      .eph-download {display:inline-flex;align-items:center;justify-content:center;width:32px;height:28px;border:1px solid rgba(127,127,127,.22);border-radius:8px;text-decoration:none;background:var(--secondary-background-color);color:#0f766e;font-size:.88rem;}
+      .eph-download:hover {background:rgba(15,118,110,.12);border-color:rgba(15,118,110,.35);}
+      .map-legend {font-size:.72rem;color:rgba(127,127,127,.92);margin:.35rem 0 .55rem;}
+      .eph-priority {display:inline-flex;align-items:center;gap:.35rem;padding:.22rem .42rem;border-radius:999px;font-size:.63rem;font-weight:800;margin-bottom:.34rem;border:1px solid rgba(127,127,127,.18);background:var(--secondary-background-color);}
+      .eph-primary-file {font-size:.67rem;line-height:1.25;margin:.25rem 0 .35rem;color:var(--text-color);}
+      .eph-note {font-size:.62rem;line-height:1.25;color:rgba(127,127,127,.92);margin-top:.35rem;}
+      .eph-not-found {padding:.55rem .6rem;border-radius:10px;border:1px dashed rgba(127,127,127,.30);background:var(--secondary-background-color);font-size:.67rem;line-height:1.3;color:var(--text-color);}
       @media (max-width: 900px) { .eph-grid {grid-template-columns:1fr;} }
     </style>
     """,
@@ -136,7 +142,7 @@ def show_help(tool):
         )
     else:
         st.info(
-            "Busca efemérides finales para un día antes, el día de observación y el día siguiente."
+            "Verifica productos reales para un día antes, el día de observación y el día siguiente. Prioridad: Final → Rapid → Ultra-Rapid."
         )
 
 
@@ -191,6 +197,24 @@ def show_google_embed(lat: float, lon: float, zoom: int = 15):
     url = f"https://www.google.com/maps/embed/v1/view?key={key}&center={lat:.8f}%2C{lon:.8f}&zoom={zoom}"
     html = f"<iframe src=\"{url}\" width=\"100%\" height=\"430\" style=\"border:0;border-radius:12px\" loading=\"lazy\" allowfullscreen referrerpolicy=\"strict-origin-when-cross-origin\"></iframe>"
     components.html(html, height=440, scrolling=False)
+
+
+def integration_status():
+    """Compact status panel for external integrations."""
+    items = [
+        ("Google Sheets", history_configured()),
+        ("Google Drive", drive_configured()),
+        ("Login Google", auth_is_configured()),
+    ]
+    try:
+        maps_key = bool(st.secrets.get("GOOGLE_MAPS_EMBED_API_KEY", ""))
+    except Exception:
+        maps_key = False
+    items.append(("Google Maps Embed", maps_key))
+    cols = st.columns(len(items))
+    for col, (label, ok) in zip(cols, items):
+        with col:
+            status(("🟢 " if ok else "🟡 ") + label + (" · conectado" if ok else " · pendiente"), "ok" if ok else "warn")
 
 
 def haversine_m(lat1, lon1, lat2, lon2):
@@ -264,7 +288,7 @@ with st.sidebar:
     with st.expander("Versiones", expanded=False):
         st.markdown(
             """
-            **V10.1 · Efemérides en vista compacta y profesional, sin espacios vacíos.**
+            **V10.3 · Efemérides verificadas por disponibilidad real + prioridad Final → Rapid → Ultra-Rapid + modo oscuro.**
 
             **V9.1 · Corrección de arranque + placa oficial CONPLANOS como respaldo + código y año dinámicos.**
 
@@ -289,9 +313,11 @@ with st.sidebar:
     if auth_is_configured() and getattr(st.user, "is_logged_in", False):
         st.caption(f"👤 {getattr(st.user, 'name', '') or getattr(st.user, 'email', '')}")
         st.button("Cerrar sesión", on_click=st.logout, use_container_width=True)
-    st.caption("CONPLANOS GNSS · versión 10.1")
+    st.caption("CONPLANOS GNSS · versión 10.3")
+    st.caption("🎨 Tema claro/oscuro: ⋮ → Settings → Theme")
 
 st.markdown('<div class="app-title">🛰️ CONPLANOS - Herramientas GNSS</div>', unsafe_allow_html=True)
+integration_status()
 
 # ========================================================
 # Corrector GNSS
@@ -683,17 +709,33 @@ elif tool == "Certificados":
                             pdf_path = tmpdir / f"Certificado_{data.codigo.strip()}.pdf"
                             generate_certificate_docx(data, image_path, TEMPLATES_DIR / "certificado_punto_geodesico_template.docx", docx_path)
                             generate_certificate_pdf(data, image_path, TEMPLATES_DIR / "certificate_template.pdf", pdf_path)
+                            pdf_bytes = pdf_path.read_bytes()
+                            docx_bytes = docx_path.read_bytes()
                             record = make_record(data, report, report_file.name, pdf_path.name, docx_path.name)
+                            drive_info = {"pdf": "", "word": "", "folder": ""}
+                            if drive_configured():
+                                try:
+                                    up_pdf = drive_upload_bytes(pdf_bytes, pdf_path.name, "application/pdf")
+                                    up_docx = drive_upload_bytes(docx_bytes, docx_path.name, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                                    drive_info = {"pdf": up_pdf.get("url", ""), "word": up_docx.get("url", ""), "folder": "CONPLANOS GNSS - CERTIFICADOS"}
+                                    record["drive_pdf"] = drive_info["pdf"]
+                                    record["drive_word"] = drive_info["word"]
+                                    record["drive_carpeta"] = drive_info["folder"]
+                                except Exception as exc:
+                                    st.warning(f"📁 Certificado generado, pero Google Drive no pudo guardar los archivos: {exc}")
                             st.session_state["certificate_output_v8"] = {
-                                "pdf": pdf_path.read_bytes(), "pdf_name": pdf_path.name,
-                                "docx": docx_path.read_bytes(), "docx_name": docx_path.name,
-                                "record": record,
+                                "pdf": pdf_bytes, "pdf_name": pdf_path.name,
+                                "docx": docx_bytes, "docx_name": docx_path.name,
+                                "record": record, "drive": drive_info,
                             }
                             st.session_state.setdefault("cert_session_records_v8", []).append(record)
                             if history_configured():
                                 try:
                                     append_point(record)
-                                    st.success("✅ Certificado generado y registrado en Google Sheets.")
+                                    if drive_info["pdf"] and drive_info["word"]:
+                                        st.success("✅ Certificado generado, guardado en Google Drive y registrado en Google Sheets.")
+                                    else:
+                                        st.success("✅ Certificado generado y registrado en Google Sheets.")
                                 except Exception as exc:
                                     st.warning(f"✅ Certificado generado, pero Google Sheets no pudo guardar el registro: {exc}")
                             else:
@@ -707,6 +749,14 @@ elif tool == "Certificados":
                     c1, c2 = st.columns(2)
                     c1.download_button("⬇️ Descargar CERTIFICADO PDF", output["pdf"], file_name=output["pdf_name"], mime="application/pdf", use_container_width=True, on_click="ignore", key="cert_pdf_dl_v8")
                     c2.download_button("⬇️ Descargar WORD editable", output["docx"], file_name=output["docx_name"], mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True, on_click="ignore", key="cert_docx_dl_v8")
+                    drive_info = output.get("drive", {})
+                    if drive_info.get("pdf") or drive_info.get("word"):
+                        st.markdown("**☁️ Archivos guardados en Google Drive**")
+                        d1, d2 = st.columns(2)
+                        if drive_info.get("pdf"):
+                            d1.link_button("📄 Abrir PDF en Drive", drive_info["pdf"], use_container_width=True)
+                        if drive_info.get("word"):
+                            d2.link_button("📝 Abrir Word en Drive", drive_info["word"], use_container_width=True)
         with right:
             card("📌 Regla del certificado", "El certificado corresponde al <b>PUNTO MÓVIL</b>. La estación de referencia no se certifica.")
             card("🤖 Automático", "Norte · Este · Zona · Latitud · Longitud · H elipsoidal · Estación GNSS · Fecha de posicionamiento · Año")
@@ -909,57 +959,109 @@ elif tool == "Certificados":
 # ========================================================
 elif tool == "Efemérides precisas":
     st.subheader("📡 Efemérides precisas")
-    st.caption("Finales oficiales · 1 día antes · día de lectura · 1 día después")
+    st.caption("Verificación real de disponibilidad · sin inventar enlaces · prioridad Final → Rapid → Ultra-Rapid")
 
     c_date, c_btn = st.columns([1.25, .75], vertical_alignment="bottom")
     with c_date:
-        target = st.date_input("Fecha de lectura", value=date.today(), key="eph_date_v10", format="DD/MM/YYYY")
+        target = st.date_input("Fecha de lectura", value=today_lima(), key="eph_date_v102", format="DD/MM/YYYY")
     with c_btn:
-        search = st.button("🔎 BUSCAR EFEMÉRIDES", type="primary", use_container_width=True, key="search_eph_v10")
+        search = st.button("🔎 BUSCAR EFEMÉRIDES", type="primary", use_container_width=True, key="search_eph_v102")
 
     if search:
-        with st.spinner("Comprobando disponibilidad de productos oficiales…"):
-            products = find_products(target, check=True)
-        st.session_state["eph_products_v10"] = group_by_day(products)
-        st.session_state["eph_target_v10"] = target
+        results = {}
+        with st.spinner("Verificando productos oficiales y la hora de liberación…"):
+            for delta in (-1, 0, 1):
+                d = target + timedelta(days=delta)
+                best, alternatives = find_best_for_day(d, check=True)
+                results[d] = {"best": best, "alternatives": alternatives}
+        st.session_state["eph_results_v102"] = results
+        st.session_state["eph_target_v102"] = target
+        st.session_state["eph_checked_utc_v102"] = now_utc().isoformat()
 
-    grouped = st.session_state.get("eph_products_v10")
-    eph_target = st.session_state.get("eph_target_v10", target)
-    if grouped is not None:
-        st.markdown('<div class="neutral" style="margin:.35rem 0 .55rem 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;"><b>Prioridad</b> · ESA Final 5 min <span style="color:#94a3b8">→</span> IGS Final 15 min <span style="color:#94a3b8">→</span> otras soluciones Final 5 min</div>', unsafe_allow_html=True)
+    results = st.session_state.get("eph_results_v102")
+    eph_target = st.session_state.get("eph_target_v102", target)
+    if results:
+        checked_utc = st.session_state.get("eph_checked_utc_v102")
+        try:
+            checked = datetime.fromisoformat(checked_utc).astimezone(ZoneInfo("America/Lima")) if checked_utc else now_lima()
+            checked_text = checked.strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            checked_text = now_lima().strftime("%d/%m/%Y %H:%M")
+
+        st.markdown(
+            '<div class="neutral" style="margin:.35rem 0 .55rem 0;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;">'
+            '<b>Regla:</b> Final → Rapid → Ultra-Rapid &nbsp;·&nbsp; <span>La aplicación solo muestra un producto si verificó que el archivo real responde.</span></div>',
+            unsafe_allow_html=True,
+        )
 
         cards = []
         for delta, label in zip((-1, 0, 1), ("DÍA ANTERIOR", "DÍA DE LECTURA", "DÍA SIGUIENTE")):
             d = eph_target + timedelta(days=delta)
-            day_products = grouped.get(d, [])
-            available = [p for p in day_products if p.status == "Disponible"]
-            available = sorted(
-                available,
-                key=lambda prod: (0 if prod.source == "ESA" else 1 if prod.source == "IGS" else 2, prod.source),
-            )
-            rows = []
-            for prod in available:
-                source_name = prod.source
-                tone = "" if prod.source in {"ESA", "IGS"} else ' style="opacity:.82"'
-                rows.append(
-                    f'<div class="eph-item"{tone}><div class="eph-badge"><span class="eph-ok"></span> {source_name}'
-                    f'<small>{prod.sampling}</small></div>'
-                    f'<div class="eph-file" title="{prod.filename}">{prod.filename}</div>'
-                    f'<a class="eph-download" href="{prod.url}" target="_blank" rel="noopener noreferrer" aria-label="Descargar {prod.source}">⬇</a></div>'
+            item = results.get(d, {})
+            best = item.get("best")
+            alternatives = item.get("alternatives", [])
+
+            if best is None:
+                body = (
+                    f'<div class="eph-not-found"><b>Sin producto verificado.</b><br>'
+                    f'No se encontró un Final, Rapid o Ultra-Rapid disponible para {d.strftime("%d/%m/%Y")} en este momento.<br>'
+                    f'Esto no significa que el producto nunca exista; solo que aún no fue verificado como disponible.</div>'
                 )
-            if not rows:
-                rows.append('<div class="eph-muted">No hay productos disponibles para esta fecha.</div>')
-            status_line = f'{len(available)} disponibles' if available else 'Sin productos disponibles'
+            else:
+                kind_label = {"Final": "🟢 FINAL · PRIORIDAD 1", "Rapid": "🟡 RAPID · PRIORIDAD 2", "Ultra-Rapid": "🔵 ULTRA-RAPID · PRIORIDAD 3"}.get(best.kind, best.kind)
+                note = best.note or "Producto verificado en el archivo oficial."
+                body = (
+                    f'<div class="eph-priority">{kind_label}</div>'
+                    f'<div style="font-weight:800;font-size:.78rem;">{best.label}</div>'
+                    f'<div class="eph-primary-file" title="{best.filename}"><b>Archivo:</b> {best.filename}</div>'
+                )
+                if best.kind == "Ultra-Rapid" and "predicha" in note.lower():
+                    body += '<div class="eph-note">⚠️ Para esta fecha la cobertura es <b>predicha</b>. La Ultra-Rapid está diseñada para cubrir tiempo futuro; no es una efeméride Final ni Rapid.</div>'
+                else:
+                    body += f'<div class="eph-note">{note}</div>'
+                body += f'<a class="eph-download" style="width:100%;margin-top:.42rem;" href="{best.url}" target="_blank" rel="noopener noreferrer">⬇ Descargar producto oficial</a>'
+
+                alt_available = [p for p in alternatives if p.status == "Disponible" and p.url and p.filename != best.filename]
+                if alt_available:
+                    body += f'<div class="eph-note">También hay {len(alt_available)} alternativa(s) verificadas del mismo rango de producto. Se muestran al desplegar “Alternativas”.</div>'
+
             cards.append(
-                f'<div class="eph-card"><div class="eph-card-head"><div><div class="eph-card-title">📅 {d.strftime("%d/%m/%Y")}</div>'
-                f'<div class="eph-card-sub">{label} · {status_line}</div></div></div>'
-                + ''.join(rows) + '</div>'
+                f'<div class="eph-card"><div class="eph-card-head"><div>'
+                f'<div class="eph-card-title">📅 {d.strftime("%d/%m/%Y")}</div>'
+                f'<div class="eph-card-sub">{label}</div></div></div>{body}</div>'
             )
         st.markdown('<div class="eph-grid">' + ''.join(cards) + '</div>', unsafe_allow_html=True)
-        st.caption("Los enlaces abren directamente el producto oficial. CDDIS/IGS puede solicitar autenticación Earthdata en algunos casos.")
+
+        with st.expander("🔎 Ver alternativas oficiales verificadas", expanded=False):
+            any_alt = False
+            for delta, label in zip((-1, 0, 1), ("Día anterior", "Día de lectura", "Día siguiente")):
+                d = eph_target + timedelta(days=delta)
+                item = results.get(d, {})
+                best = item.get("best")
+                alternatives = item.get("alternatives", [])
+                alt_available = [p for p in alternatives if p.status == "Disponible" and p.url and (not best or p.filename != best.filename)]
+                if alt_available:
+                    any_alt = True
+                    st.markdown(f"**{label} · {d.strftime('%d/%m/%Y')}**")
+                    for p in alt_available:
+                        cols = st.columns([1.1, 3.1, .8], vertical_alignment="center")
+                        cols[0].markdown(f"**{p.source}** · {p.kind}")
+                        cols[1].caption(p.filename)
+                        cols[2].link_button("⬇", p.url, use_container_width=True)
+            if not any_alt:
+                st.caption("No hay alternativas adicionales verificadas en este momento.")
+
+        st.caption(
+            f"Verificación realizada en tiempo real: {checked_text} (hora Perú). "
+            "La Ultra-Rapid puede contener una parte observada y otra predicha; la Final/Rapid no se muestran antes de su liberación."
+        )
+        st.markdown(
+            '[Fuente oficial IGS](https://www.igs.org/products/) · '
+            '[Fuente oficial ESA GNSS Products](https://navigation-office.esa.int/GNSS_based_products.html)',
+        )
 
 # ------------------ Footer ------------------
 st.markdown(
-    '<div class="brand-footer">Creado por <b>Ing Chris</b> · <b>CONPLANOS</b> · 928 400 600 · Herramientas GNSS · v10.1</div>',
+    '<div class="brand-footer">Creado por <b>Ing Chris</b> · <b>CONPLANOS</b> · 928 400 600 · Herramientas GNSS · v10.3</div>',
     unsafe_allow_html=True,
 )
