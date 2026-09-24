@@ -1,8 +1,8 @@
-# CONPLANOS GNSS V10.3
+# CONPLANOS GNSS V10.4
 
 Aplicación Streamlit para corrección GNSS, generación de data, certificados, historial, mapa y efemérides.
 
-## Integraciones V10.3
+## Integraciones V10.4
 
 - Google Sheets: historial permanente.
 - Google Drive: almacenamiento opcional de PDF/Word de certificados.

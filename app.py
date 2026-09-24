@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 import re
 import tempfile
@@ -50,7 +51,7 @@ from certificate import (
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 LOGO_PATH = TEMPLATES_DIR / "logo_conplanos.png"
-VERSION = "10.3"
+VERSION = "10.4"
 
 st.set_page_config(
     page_title="CONPLANOS GNSS",
@@ -963,25 +964,33 @@ elif tool == "Efemérides precisas":
 
     c_date, c_btn = st.columns([1.25, .75], vertical_alignment="bottom")
     with c_date:
-        target = st.date_input("Fecha de lectura", value=today_lima(), key="eph_date_v102", format="DD/MM/YYYY")
+        target = st.date_input("Fecha de lectura", value=today_lima(), key="eph_date_v104", format="DD/MM/YYYY")
     with c_btn:
-        search = st.button("🔎 BUSCAR EFEMÉRIDES", type="primary", use_container_width=True, key="search_eph_v102")
+        search = st.button("🔎 BUSCAR EFEMÉRIDES", type="primary", use_container_width=True, key="search_eph_v104")
 
     if search:
         results = {}
-        with st.spinner("Verificando productos oficiales y la hora de liberación…"):
-            for delta in (-1, 0, 1):
-                d = target + timedelta(days=delta)
-                best, alternatives = find_best_for_day(d, check=True)
-                results[d] = {"best": best, "alternatives": alternatives}
-        st.session_state["eph_results_v102"] = results
-        st.session_state["eph_target_v102"] = target
-        st.session_state["eph_checked_utc_v102"] = now_utc().isoformat()
+        days_to_check = [target + timedelta(days=delta) for delta in (-1, 0, 1)]
+        with st.spinner("Verificando Final → Rapid → Ultra-Rapid en fuentes oficiales…"):
+            # The three requested days are independent. Run them concurrently
+            # so a slow archive for one day does not block the other two.
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                futures = {ex.submit(find_best_for_day, d, True): d for d in days_to_check}
+                for fut in as_completed(futures):
+                    d = futures[fut]
+                    try:
+                        best, alternatives = fut.result()
+                    except Exception as exc:
+                        best, alternatives = None, []
+                    results[d] = {"best": best, "alternatives": alternatives}
+        st.session_state["eph_results_v104"] = results
+        st.session_state["eph_target_v104"] = target
+        st.session_state["eph_checked_utc_v104"] = now_utc().isoformat()
 
-    results = st.session_state.get("eph_results_v102")
-    eph_target = st.session_state.get("eph_target_v102", target)
+    results = st.session_state.get("eph_results_v104")
+    eph_target = st.session_state.get("eph_target_v104", target)
     if results:
-        checked_utc = st.session_state.get("eph_checked_utc_v102")
+        checked_utc = st.session_state.get("eph_checked_utc_v104")
         try:
             checked = datetime.fromisoformat(checked_utc).astimezone(ZoneInfo("America/Lima")) if checked_utc else now_lima()
             checked_text = checked.strftime("%d/%m/%Y %H:%M")
@@ -1062,6 +1071,6 @@ elif tool == "Efemérides precisas":
 
 # ------------------ Footer ------------------
 st.markdown(
-    '<div class="brand-footer">Creado por <b>Ing Chris</b> · <b>CONPLANOS</b> · 928 400 600 · Herramientas GNSS · v10.3</div>',
+    '<div class="brand-footer">Creado por <b>Ing Chris</b> · <b>CONPLANOS</b> · 928 400 600 · Herramientas GNSS · v10.4</div>',
     unsafe_allow_html=True,
 )

@@ -1,8 +1,8 @@
-# Actualizar CONPLANOS GNSS a V10.3
+# Actualizar CONPLANOS GNSS a V10.4
 
 Reemplaza los archivos del repositorio por los de este ZIP manteniendo exactamente los mismos nombres.
 
-Cambios V10.3:
+Cambios V10.4:
 - Efemérides con verificación real del contenido del archivo (no basta HTTP 200).
 - Prioridad por cada fecha: Final → Rapid → Ultra-Rapid.
 - No se generan enlaces Final/Rapid para fechas futuras solo por patrón de nombre.

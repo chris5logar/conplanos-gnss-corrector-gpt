@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from urllib.request import Request, urlopen
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from zoneinfo import ZoneInfo
 
 GPS_EPOCH = date(1980, 1, 6)
@@ -56,7 +57,7 @@ def _looks_like_gzip(blob: bytes) -> bool:
     return blob[:2] == b"\x1f\x8b"
 
 
-def _url_status(url: str, timeout: float = 8.0) -> str:
+def _url_status(url: str, timeout: float = 4.5) -> str:
     """Verify the actual product, not just an HTTP 200 landing/error page.
 
     Some GNSS archives return an HTML page with HTTP 200 when a file is absent
@@ -99,71 +100,62 @@ def _url_status(url: str, timeout: float = 8.0) -> str:
 
 
 def _final_candidates_for_day(d: date) -> list[EphCandidate]:
+    """Final orbit candidates from open ESA/GFZ archives plus IGS/CDDIS."""
     w = gps_week(d)
     stamp = f"{d.year:04d}{doy(d):03d}0000"
-
     esa_name = f"ESA0OPSFIN_{stamp}_01D_05M_ORB.SP3.gz"
-    esa_url = f"https://navigation-office.esa.int/products/gnss-products/{w}/{esa_name}"
-
+    gfz_name = f"GFZ0OPSFIN_{stamp}_01D_15M_ORB.SP3.gz"
     igs_name = f"IGS0OPSFIN_{stamp}_01D_15M_ORB.SP3.gz"
-    igs_url = f"https://cddis.nasa.gov/archive/gnss/products/{w}/{igs_name}"
-
-    out = [
-        EphCandidate(d, "ESA", "ESA Final · 5 min", esa_name, esa_url, "5 min", "GPS/Galileo/GLONASS/QZSS", "Final", 10),
-        EphCandidate(d, "IGS", "IGS Final combinado · 15 min", igs_name, igs_url, "15 min", "GPS", "Final", 11),
+    return [
+        EphCandidate(d, "ESA", "ESA Final · 5 min", esa_name,
+                     f"https://navigation-office.esa.int/products/gnss-products/{w}/{esa_name}",
+                     "5 min", "GPS/Galileo/GLONASS/QZSS", "Final", 10),
+        EphCandidate(d, "GFZ", "GFZ Final · 15 min", gfz_name,
+                     f"https://isdc-data.gfz.de/gnss/products/final/w{w}/{gfz_name}",
+                     "15 min", "GPS/Galileo/GLONASS", "Final", 11),
+        EphCandidate(d, "IGS", "IGS Final combinado · 15 min", igs_name,
+                     f"https://cddis.nasa.gov/archive/gnss/products/{w}/{igs_name}",
+                     "15 min", "GPS", "Final", 12),
     ]
-
-    centers = [
-        ("CODE", "COD0OPSFIN"),
-        ("GFZ", "GFZ0OPSFIN"),
-        ("GRG", "GRG0OPSFIN"),
-        ("JPL", "JPL0OPSFIN"),
-    ]
-    for label, prefix in centers:
-        name = f"{prefix}_{stamp}_01D_05M_ORB.SP3.gz"
-        url = f"https://cddis.nasa.gov/archive/gnss/products/{w}/{name}"
-        out.append(EphCandidate(d, label, f"{label} Final · 5 min", name, url, "5 min", "Según AC", "Final", 20 + centers.index((label, prefix))))
-    return out
 
 
 def _rapid_candidates_for_day(d: date) -> list[EphCandidate]:
-    """Return Rapid orbit candidates from public/official sources.
+    """Rapid orbit candidates from multiple public/official archives.
 
-    ESA publishes its IGS Analysis Center Rapid orbit directly from its public
-    GNSS products service, while the IGS combined Rapid product is archived at
-    CDDIS.  We check both instead of relying only on the combined CDDIS file.
+    ESA and GFZ publish open Rapid orbit files. IGS combined Rapid is also
+    checked as a fallback, but it may require Earthdata access from some
+    environments.  ESA/GFZ Rapid use 5-minute orbit sampling; IGS combined
+    Rapid uses 15-minute sampling.
     """
     w = gps_week(d)
     stamp = f"{d.year:04d}{doy(d):03d}0000"
-    esa_name = f"ESA0OPSRAP_{stamp}_01D_15M_ORB.SP3.gz"
-    esa_url = f"https://navigation-office.esa.int/products/gnss-products/{w}/{esa_name}"
-    igs_name = f"IGS0OPSRAP_{stamp}_01D_15M_ORB.SP3.gz"
-    igs_url = f"https://cddis.nasa.gov/archive/gnss/products/{w}/{igs_name}"
     return [
-        EphCandidate(d, "ESA", "ESA Rapid · 15 min", esa_name, esa_url, "15 min", "GPS/Galileo/GLONASS", "Rapid", 30),
-        EphCandidate(d, "IGS", "IGS Rapid combinado · 15 min", igs_name, igs_url, "15 min", "GPS", "Rapid", 31),
+        EphCandidate(
+            d, "ESA", "ESA Rapid · 5 min",
+            f"ESA0OPSRAP_{stamp}_01D_05M_ORB.SP3.gz",
+            f"https://navigation-office.esa.int/products/gnss-products/{w}/ESA0OPSRAP_{stamp}_01D_05M_ORB.SP3.gz",
+            "5 min", "GPS/Galileo/GLONASS", "Rapid", 30,
+        ),
+        EphCandidate(
+            d, "GFZ", "GFZ Rapid · 5 min",
+            f"GFZ0OPSRAP_{stamp}_01D_05M_ORB.SP3.gz",
+            f"https://isdc-data.gfz.de/gnss/products/rapid/w{w}/GFZ0OPSRAP_{stamp}_01D_05M_ORB.SP3.gz",
+            "5 min", "GPS/Galileo/GLONASS", "Rapid", 31,
+        ),
+        EphCandidate(
+            d, "IGS", "IGS Rapid combinado · 15 min",
+            f"IGS0OPSRAP_{stamp}_01D_15M_ORB.SP3.gz",
+            f"https://cddis.nasa.gov/archive/gnss/products/{w}/IGS0OPSRAP_{stamp}_01D_15M_ORB.SP3.gz",
+            "15 min", "GPS", "Rapid", 32,
+        ),
     ]
 
 
-def _ultra_starts_for_target(target: date) -> list[datetime]:
-    """Generate 6-hour Ultra-Rapid release epochs that can cover target.
-
-    The previous implementation searched only around *today*. That made a
-    historical request such as 20/09/2026 fail on 24/09/2026 even though an
-    archived Ultra-Rapid product for 20/09 was available. Search around the
-    requested date instead.
-    """
-    target_start = datetime.combine(target, time(0, tzinfo=UTC))
-    # A 48-hour Ultra-Rapid file covers the target if its start is between
-    # target-48h and target+23h45. Include a small margin of releases.
-    return [target_start + timedelta(hours=6 * i) for i in range(-8, 5)]
-
-
 def _ultra_candidates_for_start(start: datetime, requested_day: date) -> list[EphCandidate]:
-    """Return ESA and IGS Ultra-Rapid candidates for one release epoch."""
+    """Return ESA, GFZ and IGS Ultra-Rapid candidates for one release epoch."""
     sdate = start.date()
     w = gps_week(sdate)
-    stamp = f"{sdate.year:04d}{doy(sdate):03d}{start.hour:02d}00"
+    stamp = f"{sdate.year:04d}{doy(sdate):03d}{start.hour:02d}{start.minute:02d}"
     coverage_start = start
     coverage_end = start + timedelta(hours=48) - timedelta(minutes=15)
 
@@ -181,116 +173,123 @@ def _ultra_candidates_for_start(start: datetime, requested_day: date) -> list[Ep
     else:
         note = "Cobertura mixta: observada + predicha"
 
-    esa_name = f"ESA0OPSULT_{stamp}_02D_15M_ORB.SP3.gz"
-    esa_url = f"https://navigation-office.esa.int/products/gnss-products/{w}/{esa_name}"
+    # ESA and IGS issue every 6 h. GFZ issues its Ultra-Rapid approximately
+    # every 3 h, so GFZ is generated separately by _ultra_starts_for_target.
+    esa_name = f"ESA0OPSULT_{stamp}_02D_05M_ORB.SP3.gz"
     igs_name = f"IGS0OPSULT_{stamp}_02D_15M_ORB.SP3.gz"
-    igs_url = f"https://cddis.nasa.gov/archive/gnss/products/{w}/{igs_name}"
+    gfz_name = f"GFZ0OPSULT_{stamp}_02D_05M_ORB.SP3.gz"
     return [
-        EphCandidate(requested_day, "ESA", "ESA Ultra-Rapid · 15 min", esa_name, esa_url, "15 min", "GPS/Galileo/GLONASS", "Ultra-Rapid", 40, coverage_start=coverage_start, coverage_end=coverage_end, note=note),
-        EphCandidate(requested_day, "IGS", "IGS Ultra-Rapid · 15 min", igs_name, igs_url, "15 min", "GPS", "Ultra-Rapid", 41, coverage_start=coverage_start, coverage_end=coverage_end, note=note),
+        EphCandidate(requested_day, "ESA", "ESA Ultra-Rapid · 5 min", esa_name,
+                     f"https://navigation-office.esa.int/products/gnss-products/{w}/{esa_name}",
+                     "5 min", "GPS/Galileo/GLONASS", "Ultra-Rapid", 40,
+                     coverage_start=coverage_start, coverage_end=coverage_end, note=note),
+        EphCandidate(requested_day, "GFZ", "GFZ Ultra-Rapid · 5 min", gfz_name,
+                     f"https://isdc-data.gfz.de/gnss/products/ultra/w{w}/{gfz_name}",
+                     "5 min", "GPS/Galileo/GLONASS", "Ultra-Rapid", 41,
+                     coverage_start=coverage_start, coverage_end=coverage_end, note=note),
+        EphCandidate(requested_day, "IGS", "IGS Ultra-Rapid · 15 min", igs_name,
+                     f"https://cddis.nasa.gov/archive/gnss/products/{w}/{igs_name}",
+                     "15 min", "GPS", "Ultra-Rapid", 42,
+                     coverage_start=coverage_start, coverage_end=coverage_end, note=note),
     ]
+
+
+def _ultra_starts_for_target(target: date) -> list[datetime]:
+    """Generate a compact set of release epochs that can cover target.
+
+    For a 48-hour product, releases from target-24h through target+18h can
+    cover the target day. ESA/IGS issue every 6 h; GFZ issues approximately
+    every 3 h. We therefore test a 3-hour grid, but only 15 epochs total.
+    """
+    target_start = datetime.combine(target, time(0, tzinfo=UTC))
+    return [target_start + timedelta(hours=3 * i) for i in range(-8, 7)]
+
+
+def _verify_batch(candidates: list[EphCandidate]) -> None:
+    """Verify a batch concurrently to avoid serial 4.5 s network delays."""
+    if not candidates:
+        return
+    with ThreadPoolExecutor(max_workers=min(18, len(candidates))) as ex:
+        futures = {ex.submit(_url_status, p.url): p for p in candidates}
+        for fut in as_completed(futures):
+            p = futures[fut]
+            try:
+                p.status = fut.result()
+            except Exception as exc:
+                p.status = f"No disponible / error: {exc}"
+
+
+def _select_ultra(available_ultras: list[EphCandidate], target: date) -> EphCandidate | None:
+    if not available_ultras:
+        return None
+    day_start = datetime.combine(target, time(0, tzinfo=UTC))
+    day_end = day_start + timedelta(days=1) - timedelta(minutes=15)
+
+    def score(p: EphCandidate):
+        overlap_start = max(p.coverage_start or day_start, day_start)
+        overlap_end = min(p.coverage_end or day_end, day_end)
+        overlap_minutes = max(0.0, (overlap_end - overlap_start).total_seconds() / 60.0)
+        full_day = 1 if overlap_minutes >= (24 * 60 - 15) else 0
+        # Prefer complete coverage, then greatest overlap, then newest issue,
+        # then ESA/GFZ before IGS when release time is identical.
+        source_rank = {"ESA": 3, "GFZ": 2, "IGS": 1}.get(p.source, 0)
+        return (full_day, overlap_minutes, p.coverage_start or datetime.min.replace(tzinfo=UTC), source_rank)
+
+    return max(available_ultras, key=score)
 
 
 def find_best_for_day(target: date, check: bool = True) -> tuple[EphCandidate | None, list[EphCandidate]]:
     """Return the best currently verifiable product for the requested day.
 
-    Priority: Final -> Rapid -> Ultra-Rapid. Only a real product response is
-    accepted; URL patterns alone are never treated as availability.
+    Priority is strict: Final -> Rapid -> Ultra-Rapid. Each priority tier is
+    checked in parallel across several official/public archives, which makes
+    the search much faster and avoids depending on one server.
     """
     alternatives: list[EphCandidate] = []
 
-    # Final products: exact file for the requested day.
+    # 1) FINAL: exact day. These are intentionally checked first.
     finals = _final_candidates_for_day(target)
     if check:
+        _verify_batch(finals)
+    else:
         for p in finals:
-            p.status = _url_status(p.url)
+            p.status = "No comprobado"
     alternatives.extend(finals)
-    available_finals = [p for p in finals if p.status == "Disponible"]
-    if available_finals:
-        available_finals.sort(key=lambda p: p.priority)
-        return available_finals[0], alternatives
+    available = [p for p in finals if p.status == "Disponible"]
+    if available:
+        return min(available, key=lambda p: p.priority), alternatives
 
-    # Rapid: check all official Rapid candidates for the exact requested day.
-    # If ESA is available it is preferred here because its public archive is
-    # directly downloadable; IGS combined remains a verified fallback.
+    # 2) RAPID: check ESA + GFZ + IGS in parallel.
     rapids = _rapid_candidates_for_day(target)
     if check:
+        _verify_batch(rapids)
+    else:
         for p in rapids:
-            p.status = _url_status(p.url)
+            p.status = "No comprobado"
     alternatives.extend(rapids)
-    available_rapids = [p for p in rapids if p.status == "Disponible"]
-    if available_rapids:
-        available_rapids.sort(key=lambda p: p.priority)
-        return available_rapids[0], alternatives
+    available = [p for p in rapids if p.status == "Disponible"]
+    if available:
+        return min(available, key=lambda p: p.priority), alternatives
 
-    # Ultra-Rapid: search releases around the REQUESTED day, not around today.
-    # Each product contains 48 hours, so historical dates can be served from
-    # archived Ultra-Rapid files even several days after the observation.
+    # 3) ULTRA-RAPID: historical/current releases covering the requested day.
+    # We check ESA, GFZ and IGS from release epochs around the target day.
     ultras: list[EphCandidate] = []
-    seen_urls: set[str] = set()
+    seen: set[str] = set()
     for start in _ultra_starts_for_target(target):
         for cand in _ultra_candidates_for_start(start, target):
-            if cand.url in seen_urls:
-                continue
-            seen_urls.add(cand.url)
-            if check:
-                cand.status = _url_status(cand.url)
-            ultras.append(cand)
+            if cand.url not in seen:
+                seen.add(cand.url)
+                ultras.append(cand)
 
+    if check:
+        _verify_batch(ultras)
+    else:
+        for p in ultras:
+            p.status = "No comprobado"
     alternatives.extend(ultras)
-    available_ultras = [p for p in ultras if p.status == "Disponible"]
-    if available_ultras:
-        # Prefer a file that covers the COMPLETE requested UTC day. If several
-        # do, use the newest release; within the same release prefer ESA over
-        # the CDDIS combined fallback. If no file covers the whole day, use the
-        # one with the greatest overlap and then the newest release.
-        day_start = datetime.combine(target, time(0, tzinfo=UTC))
-        day_end = day_start + timedelta(days=1) - timedelta(minutes=15)
-
-        def ultra_score(p: EphCandidate):
-            overlap_start = max(p.coverage_start or day_start, day_start)
-            overlap_end = min(p.coverage_end or day_end, day_end)
-            overlap_minutes = max(0.0, (overlap_end - overlap_start).total_seconds() / 60.0)
-            full_day = 1 if overlap_minutes >= (24 * 60 - 15) else 0
-            return (full_day, overlap_minutes, p.coverage_start or datetime.min.replace(tzinfo=UTC), -p.priority)
-
-        available_ultras.sort(key=ultra_score, reverse=True)
-        return available_ultras[0], alternatives
+    available = [p for p in ultras if p.status == "Disponible"]
+    best = _select_ultra(available, target)
+    if best:
+        return best, alternatives
 
     return None, alternatives
-
-
-def find_products(target: date, check: bool = True) -> list[EphCandidate]:
-    """Return one recommended real product per day for target-1, target, target+1."""
-    out: list[EphCandidate] = []
-    for delta in (-1, 0, 1):
-        d = target + timedelta(days=delta)
-        best, alternatives = find_best_for_day(d, check=check)
-        if best is not None:
-            out.append(best)
-        else:
-            # Preserve an explicit marker so the UI can explain that nothing
-            # has been released/verified yet rather than inventing a URL.
-            out.append(
-                EphCandidate(
-                    d,
-                    "—",
-                    "Sin producto verificado",
-                    "",
-                    "",
-                    "",
-                    "",
-                    "Sin disponibilidad",
-                    99,
-                    status="Sin producto",
-                    note="No se verificó ningún Final, Rapid o Ultra-Rapid disponible que cubra esta fecha en este momento.",
-                )
-            )
-    return out
-
-
-def group_by_day(products: list[EphCandidate]) -> dict[date, list[EphCandidate]]:
-    out: dict[date, list[EphCandidate]] = {}
-    for p in products:
-        out.setdefault(p.day, []).append(p)
-    return out

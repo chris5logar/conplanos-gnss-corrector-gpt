@@ -1,4 +1,4 @@
-# CONPLANOS GNSS V10.3 — MANUAL DE CONEXIONES
+# CONPLANOS GNSS V10.4 — MANUAL DE CONEXIONES
 
 ## Objetivo
 
@@ -23,11 +23,11 @@ No pegues ninguna clave privada en GitHub.
 
 ---
 
-# PASO 0 — SUBIR V10.3
+# PASO 0 — SUBIR V10.4
 
 1. Descarga el ZIP de esta versión.
 2. Descomprime el ZIP.
-3. Reemplaza en tu repositorio los archivos existentes por los de V10.3.
+3. Reemplaza en tu repositorio los archivos existentes por los de V10.4.
 4. Si aparece `drive.py`, súbelo también.
 5. Conserva la carpeta `templates/` completa.
 6. No subas un archivo real llamado `.streamlit/secrets.toml`.
@@ -182,13 +182,13 @@ Si aparece `SpreadsheetNotFound`, casi siempre debes revisar que el Sheet fue co
 
 No necesitas crear una carpeta obligatoriamente.
 
-V10.3 puede crear/reutilizar:
+V10.4 puede crear/reutilizar:
 
 `CONPLANOS GNSS - CERTIFICADOS`
 
 en el Drive de la cuenta de servicio.
 
-Cuando generes un certificado, V10.3 intentará guardar:
+Cuando generes un certificado, V10.4 intentará guardar:
 
 - PDF
 - Word
@@ -294,7 +294,7 @@ En Google Cloud:
 GOOGLE_MAPS_EMBED_API_KEY = "AIza..."
 ```
 
-Al tenerla, V10.3 mostrará el mapa Google incrustado cuando se localice un punto.
+Al tenerla, V10.4 mostrará el mapa Google incrustado cuando se localice un punto.
 
 ---
 
@@ -367,7 +367,7 @@ Haz estas pruebas en orden:
 - Crear OAuth para Login.
 - Crear API Key de Maps Embed si decides usarla.
 - Pegar Secrets en Streamlit.
-- Subir V10.3 a GitHub.
+- Subir V10.4 a GitHub.
 
 ## Yo
 
