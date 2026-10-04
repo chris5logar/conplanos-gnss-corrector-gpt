@@ -1,12 +1,10 @@
-__pycache__/
+.git
+.venv
+__pycache__
 *.py[cod]
-.venv/
 .env
 .env.*
-!.env.example
 .streamlit/secrets.toml
 secrets.toml
 *.log
-*.csv
-*.pdf
-!templates/*.pdf
+*.ipynb

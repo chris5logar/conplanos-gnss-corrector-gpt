@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: conplanos-gnss
+    runtime: docker
+    plan: free
+    region: virginia
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: python start_render.py
+    healthCheckPath: /_stcore/health
+    autoDeployTrigger: off

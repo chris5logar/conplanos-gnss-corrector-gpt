@@ -24,4 +24,13 @@ textColor = "#f3f4f6"
 
 [server]
 headless = true
+address = "0.0.0.0"
+fileWatcherType = "none"
 maxUploadSize = 200
+
+[browser]
+gatherUsageStats = false
+
+[secrets]
+files = ["~/.streamlit/secrets.toml", ".streamlit/secrets.toml", "/etc/secrets/secrets.toml"]
+

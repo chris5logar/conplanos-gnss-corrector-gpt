@@ -166,7 +166,7 @@ def maybe_require_login():
             st.image(str(LOGO_PATH), width=270)
         st.title("Acceso a CONPLANOS GNSS")
         st.write("Inicia sesión con tu cuenta de Google para entrar a la aplicación.")
-        st.button("🔐 INICIAR SESIÓN CON GOOGLE", on_click=st.login, type="primary", use_container_width=True)
+        st.button("🔐 INICIAR SESIÓN CON GOOGLE", on_click=st.login, type="primary", width="stretch")
         st.caption("La autenticación se realiza mediante Google OIDC y no guarda tu contraseña en CONPLANOS.")
         st.markdown('</div>', unsafe_allow_html=True)
         st.stop()
@@ -272,7 +272,7 @@ maybe_require_login()
 with st.sidebar:
     if LOGO_PATH.exists():
         st.markdown('<div class="brand-badge">', unsafe_allow_html=True)
-        st.image(str(LOGO_PATH), use_container_width=True)
+        st.image(str(LOGO_PATH), width="stretch")
         st.markdown('</div>', unsafe_allow_html=True)
     st.markdown("## 🛰️ CONPLANOS GNSS")
     tool = st.radio(
@@ -313,7 +313,7 @@ with st.sidebar:
 
     if auth_is_configured() and getattr(st.user, "is_logged_in", False):
         st.caption(f"👤 {getattr(st.user, 'name', '') or getattr(st.user, 'email', '')}")
-        st.button("Cerrar sesión", on_click=st.logout, use_container_width=True)
+        st.button("Cerrar sesión", on_click=st.logout, width="stretch")
     st.caption("CONPLANOS GNSS · versión 10.3")
     st.caption("🎨 Tema claro/oscuro: ⋮ → Settings → Theme")
 
@@ -445,7 +445,7 @@ if tool == "Corrector GNSS":
                         corrections[name] = (man_e, man_n, man_h, None, None)
 
         st.markdown('<div class="step">PASO 3</div>', unsafe_allow_html=True)
-        if st.button("🚀 GENERAR Y PREPARAR DESCARGAS", type="primary", use_container_width=True, key="generate_corrector_v8"):
+        if st.button("🚀 GENERAR Y PREPARAR DESCARGAS", type="primary", width="stretch", key="generate_corrector_v8"):
             if len(corrections) != len(infos):
                 st.error("Falta asignar la corrección a una o más datas.")
             else:
@@ -494,9 +494,9 @@ if tool == "Corrector GNSS":
                 name, native_b, native_name, corrected_b, corrected_name, polygon_b, polygon_name = item
                 with st.expander(f"{name}", expanded=len(st.session_state["corrector_artifacts_v8"]) == 1):
                     d1, d2, d3 = st.columns(3)
-                    d1.download_button("⬇️ Nativa ACTUALIZADA", native_b, file_name=native_name, mime="text/csv", use_container_width=True, on_click="ignore", key=f"dn_v8_{idx}")
-                    d2.download_button("⬇️ CORREGIDA", corrected_b, file_name=corrected_name, mime="text/csv", use_container_width=True, on_click="ignore", key=f"dc_v8_{idx}")
-                    d3.download_button("⬇️ POLÍGONO", polygon_b, file_name=polygon_name, mime="text/csv", use_container_width=True, on_click="ignore", key=f"dp_v8_{idx}")
+                    d1.download_button("⬇️ Nativa ACTUALIZADA", native_b, file_name=native_name, mime="text/csv", width="stretch", on_click="ignore", key=f"dn_v8_{idx}")
+                    d2.download_button("⬇️ CORREGIDA", corrected_b, file_name=corrected_name, mime="text/csv", width="stretch", on_click="ignore", key=f"dc_v8_{idx}")
+                    d3.download_button("⬇️ POLÍGONO", polygon_b, file_name=polygon_name, mime="text/csv", width="stretch", on_click="ignore", key=f"dp_v8_{idx}")
                     calc = st.session_state.get("corrector_calc_v8", {}).get(name, {})
                     if calc:
                         c1, c2, c3 = st.columns(3)
@@ -507,9 +507,9 @@ if tool == "Corrector GNSS":
             if merged:
                 st.markdown('<div class="download-head">📦 Descargas unidas · una sola base</div>', unsafe_allow_html=True)
                 mb1, mb2, mb3 = st.columns(3)
-                mb1.download_button("⬇️ NATIVA ACTUALIZADA UNIDA", merged[0], file_name="CONPLANOS_NATIVA_ACTUALIZADA_UNIDA.csv", mime="text/csv", use_container_width=True, on_click="ignore", key="merged_native_v8")
-                mb2.download_button("⬇️ CORREGIDA UNIDA", merged[1], file_name="CONPLANOS_CORREGIDA_UNIDA.csv", mime="text/csv", use_container_width=True, on_click="ignore", key="merged_corr_v8")
-                mb3.download_button("⬇️ POLÍGONO UNIDO", merged[2], file_name="CONPLANOS_POLIGONO_UNIDO.csv", mime="text/csv", use_container_width=True, on_click="ignore", key="merged_poly_v8")
+                mb1.download_button("⬇️ NATIVA ACTUALIZADA UNIDA", merged[0], file_name="CONPLANOS_NATIVA_ACTUALIZADA_UNIDA.csv", mime="text/csv", width="stretch", on_click="ignore", key="merged_native_v8")
+                mb2.download_button("⬇️ CORREGIDA UNIDA", merged[1], file_name="CONPLANOS_CORREGIDA_UNIDA.csv", mime="text/csv", width="stretch", on_click="ignore", key="merged_corr_v8")
+                mb3.download_button("⬇️ POLÍGONO UNIDO", merged[2], file_name="CONPLANOS_POLIGONO_UNIDO.csv", mime="text/csv", width="stretch", on_click="ignore", key="merged_poly_v8")
             if st.button("🧹 Limpiar resultados de descarga", key="clear_corr_v8"):
                 for k in ["corrector_artifacts_v8", "corrector_calc_v8", "corrector_merged_v8"]:
                     st.session_state.pop(k, None)
@@ -564,7 +564,7 @@ elif tool == "Generador de data":
         else:
             sources = [(f.name, f.getvalue()) for f in plan_uploads]
             points, diagnostics = extract_coordinate_sources(sources)
-            st.dataframe(diagnostics, use_container_width=True, hide_index=True)
+            st.dataframe(diagnostics, width="stretch", hide_index=True)
             valid_points = [p for p in points if p.e is not None and p.n is not None]
             st.markdown("**Coordenadas interpretadas por CONPLANOS**")
             st.dataframe(
@@ -572,7 +572,7 @@ elif tool == "Generador de data":
                     {"Fuente": p.source or "—", "Nombre detectado": p.name or "—", "Este (E)": round(p.e, 4), "Norte (N)": round(p.n, 4), "Zona": p.zone or "—"}
                     for p in valid_points
                 ],
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
             )
             t1, t2, t3 = st.columns(3)
             t1.metric("Coordenadas leídas", len(valid_points))
@@ -588,7 +588,7 @@ elif tool == "Generador de data":
                 card("⛰️ Altura matemática", "Dentro de la envolvente de los puntos nativos se usa una red TIN (Delaunay) y interpolación lineal por triángulo. Fuera de esa envolvente se usa IDW como respaldo. Esto estima una superficie; no reemplaza una cota observada.")
 
             st.markdown('<div class="step">PASO 3</div>', unsafe_allow_html=True)
-            if st.button("🧩 GENERAR DATA DERIVADA", type="primary", use_container_width=True, key="generate_data_v8"):
+            if st.button("🧩 GENERAR DATA DERIVADA", type="primary", width="stretch", key="generate_data_v8"):
                 if not same_base:
                     st.error("Para generar un único proyecto debes usar una sola base común en las datas nativas.")
                 else:
@@ -633,13 +633,13 @@ elif tool == "Generador de data":
                 c4.metric("Dist. media", f"{s['mean_nearest_distance_m']:.4f} m")
                 st.caption("Métodos de altura: " + ", ".join(f"{k}: {v}" for k, v in s.get("interpolation_methods", {}).items()) if s.get("interpolation_methods") else "No hubo puntos nuevos que interpolar.")
                 db1, db2, db3 = st.columns(3)
-                db1.download_button("⬇️ DATA GENERADA UNIDA", result["out"], file_name="CONPLANOS_DATA_GENERADA_UNIDA.csv", mime="text/csv", use_container_width=True, on_click="ignore", key="gen_union_v8")
-                db2.download_button("⬇️ NATIVA ACTUALIZADA UNIDA", result["native"], file_name="CONPLANOS_NATIVA_ACTUALIZADA_UNIDA.csv", mime="text/csv", use_container_width=True, on_click="ignore", key="gen_native_v8")
-                db3.download_button("📦 DESCARGAR TODO (ZIP)", result["package"], file_name="CONPLANOS_GENERADOR_RESULTADOS.zip", mime="application/zip", use_container_width=True, on_click="ignore", key="gen_zip_v8")
+                db1.download_button("⬇️ DATA GENERADA UNIDA", result["out"], file_name="CONPLANOS_DATA_GENERADA_UNIDA.csv", mime="text/csv", width="stretch", on_click="ignore", key="gen_union_v8")
+                db2.download_button("⬇️ NATIVA ACTUALIZADA UNIDA", result["native"], file_name="CONPLANOS_NATIVA_ACTUALIZADA_UNIDA.csv", mime="text/csv", width="stretch", on_click="ignore", key="gen_native_v8")
+                db3.download_button("📦 DESCARGAR TODO (ZIP)", result["package"], file_name="CONPLANOS_GENERADOR_RESULTADOS.zip", mime="application/zip", width="stretch", on_click="ignore", key="gen_zip_v8")
                 if result["separate"]:
                     st.markdown('<div class="download-head">📥 Resultados separados por archivo/fuente</div>', unsafe_allow_html=True)
                     for idx, (name, b, _, ss) in enumerate(result["separate"]):
-                        st.download_button(f"⬇️ {name}", b, file_name=f"{name}_DATA_GENERADA.csv", mime="text/csv", use_container_width=True, on_click="ignore", key=f"gen_sep_{idx}_v8")
+                        st.download_button(f"⬇️ {name}", b, file_name=f"{name}_DATA_GENERADA.csv", mime="text/csv", width="stretch", on_click="ignore", key=f"gen_sep_{idx}_v8")
                 if st.button("🧹 Limpiar resultados del generador", key="clear_gen_v8"):
                     st.session_state.pop("generator_result_v8", None)
                     st.rerun()
@@ -694,7 +694,7 @@ elif tool == "Certificados":
                 else:
                     st.info("Sin fotografía: se usará automáticamente la placa oficial CONPLANOS, cambiando solo el código del punto y el año.")
                 st.markdown('<div class="step">PASO 4</div>', unsafe_allow_html=True)
-                if st.button("📜 GENERAR CERTIFICADO PDF + WORD", type="primary", use_container_width=True, key="cert_generate_v8"):
+                if st.button("📜 GENERAR CERTIFICADO PDF + WORD", type="primary", width="stretch", key="cert_generate_v8"):
                     if not data.codigo.strip() or not data.solicitante.strip():
                         st.error("Debes ingresar el Código y el Solicitante.")
                     else:
@@ -748,16 +748,16 @@ elif tool == "Certificados":
                 if output:
                     st.markdown('<div class="download-head">📥 Descargas del certificado</div>', unsafe_allow_html=True)
                     c1, c2 = st.columns(2)
-                    c1.download_button("⬇️ Descargar CERTIFICADO PDF", output["pdf"], file_name=output["pdf_name"], mime="application/pdf", use_container_width=True, on_click="ignore", key="cert_pdf_dl_v8")
-                    c2.download_button("⬇️ Descargar WORD editable", output["docx"], file_name=output["docx_name"], mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True, on_click="ignore", key="cert_docx_dl_v8")
+                    c1.download_button("⬇️ Descargar CERTIFICADO PDF", output["pdf"], file_name=output["pdf_name"], mime="application/pdf", width="stretch", on_click="ignore", key="cert_pdf_dl_v8")
+                    c2.download_button("⬇️ Descargar WORD editable", output["docx"], file_name=output["docx_name"], mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", width="stretch", on_click="ignore", key="cert_docx_dl_v8")
                     drive_info = output.get("drive", {})
                     if drive_info.get("pdf") or drive_info.get("word"):
                         st.markdown("**☁️ Archivos guardados en Google Drive**")
                         d1, d2 = st.columns(2)
                         if drive_info.get("pdf"):
-                            d1.link_button("📄 Abrir PDF en Drive", drive_info["pdf"], use_container_width=True)
+                            d1.link_button("📄 Abrir PDF en Drive", drive_info["pdf"], width="stretch")
                         if drive_info.get("word"):
-                            d2.link_button("📝 Abrir Word en Drive", drive_info["word"], use_container_width=True)
+                            d2.link_button("📝 Abrir Word en Drive", drive_info["word"], width="stretch")
         with right:
             card("📌 Regla del certificado", "El certificado corresponde al <b>PUNTO MÓVIL</b>. La estación de referencia no se certifica.")
             card("🤖 Automático", "Norte · Este · Zona · Latitud · Longitud · H elipsoidal · Estación GNSS · Fecha de posicionamiento · Año")
@@ -794,7 +794,7 @@ elif tool == "Certificados":
             n_text = a2.text_input("Norte (N)", placeholder="Ej. 8550000.5678", key="map_utm_n_v10")
             zone = a3.number_input("Zona", min_value=1, max_value=60, value=18, step=1, key="map_utm_zone_v10")
             hemi = a3.selectbox("Hemisferio", ["Sur", "Norte"], index=0, key="map_utm_hemi_v10")
-            if st.button("🎯 UBICAR Y BUSCAR PUNTO MÁS CERCANO", type="primary", key="map_find_nearest_v10", use_container_width=True):
+            if st.button("🎯 UBICAR Y BUSCAR PUNTO MÁS CERCANO", type="primary", key="map_find_nearest_v10", width="stretch"):
                 try:
                     e_val = float(str(e_text).replace(",", "").strip())
                     n_val = float(str(n_text).replace(",", "").strip())
@@ -816,7 +816,7 @@ elif tool == "Certificados":
             st.markdown("**🔎 Buscar lugar**")
             place = st.text_input("Lugar o referencia", placeholder="Cusco, Sacsayhuamán, etc.", key="map_place_v10")
             if place:
-                st.link_button("🌐 Abrir búsqueda en Google Maps", f"https://www.google.com/maps/search/?api=1&query={place.replace(' ', '+')}", use_container_width=True)
+                st.link_button("🌐 Abrir búsqueda en Google Maps", f"https://www.google.com/maps/search/?api=1&query={place.replace(' ', '+')}", width="stretch")
             if history_configured():
                 st.success(f"☁️ Historial permanente conectado · {len(cert_records)} certificados · {len(ext_records)} puntos externos")
             else:
@@ -830,9 +830,9 @@ elif tool == "Certificados":
             u = st.session_state.get("map_target_utm_v10", {})
             st.caption(f"Objetivo UTM WGS84: E {u.get('e','—'):.4f} · N {u.get('n','—'):.4f} · Zona {u.get('zone','—')} {u.get('hemi','')}")
             g1, g2, g3 = st.columns(3)
-            g1.link_button("🌐 Objetivo en Google Maps", google_maps_url(*target_wgs), use_container_width=True)
-            g2.link_button("📍 Punto más cercano", google_maps_url(nearest['lat'], nearest['lon']), use_container_width=True)
-            g3.link_button("🗺️ Mapa centrado", google_maps_view_url(nearest['lat'], nearest['lon'], zoom=17), use_container_width=True)
+            g1.link_button("🌐 Objetivo en Google Maps", google_maps_url(*target_wgs), width="stretch")
+            g2.link_button("📍 Punto más cercano", google_maps_url(nearest['lat'], nearest['lon']), width="stretch")
+            g3.link_button("🗺️ Mapa centrado", google_maps_view_url(nearest['lat'], nearest['lon'], zoom=17), width="stretch")
             show_google_embed(nearest['lat'], nearest['lon'], zoom=17)
 
         # ---------------- Register external points ----------------
@@ -846,7 +846,7 @@ elif tool == "Certificados":
             default_zone = st.number_input("Zona UTM por defecto", min_value=1, max_value=60, value=18, step=1, key="external_zone_v10")
             if ext_uploads:
                 points, diagnostics = extract_coordinate_sources([(f.name, f.getvalue()) for f in ext_uploads])
-                st.dataframe(diagnostics, use_container_width=True, hide_index=True)
+                st.dataframe(diagnostics, width="stretch", hide_index=True)
                 external_pending = []
                 for i, q in enumerate(points, start=1):
                     if q.e is None or q.n is None:
@@ -862,7 +862,7 @@ elif tool == "Certificados":
                         fuente=q.source or "Archivo", observacion="Extraído automáticamente. Verificar antes de usar como referencia oficial."
                     ))
                 if external_pending:
-                    st.dataframe(external_pending, use_container_width=True, hide_index=True)
+                    st.dataframe(external_pending, width="stretch", hide_index=True)
                     if st.button("📌 REGISTRAR ESTOS PUNTOS EN EL VISOR", key="register_external_v10", type="primary"):
                         st.session_state.setdefault("external_session_records_v8", []).extend(external_pending)
                         if history_configured():
@@ -953,7 +953,7 @@ elif tool == "Certificados":
                     card("Ficha del certificado", f"Código: <b>{selected.get('codigo','—')}</b><br>Solicitante: {selected.get('solicitante','—')}<br>N: {selected.get('norte','—')} m · E: {selected.get('este','—')} m<br>Zona: {selected.get('zona','—')}<br>H elipsoidal: {selected.get('alt_ellipsoidal','—')} m<br>Estación: {selected.get('estacion_gnss','—')}<br>Fecha posición: {selected.get('fecha_posicion','—')}")
                 else:
                     card("Ficha del punto externo", f"Código: <b>{selected.get('codigo','—')}</b><br>Fuente: {selected.get('fuente','—')}<br>N: {selected.get('norte','—')} m · E: {selected.get('este','—')} m<br>Zona: {selected.get('zona','—')}<br>Observación: {selected.get('observacion','—')}")
-                st.link_button("🌐 Abrir seleccionado en Google Maps", google_maps_url(float(selected['lat']), float(selected['lon'])), use_container_width=True)
+                st.link_button("🌐 Abrir seleccionado en Google Maps", google_maps_url(float(selected['lat']), float(selected['lon'])), width="stretch")
 
 # ========================================================
 # Efemérides
@@ -966,7 +966,7 @@ elif tool == "Efemérides precisas":
     with c_date:
         target = st.date_input("Fecha de lectura", value=today_lima(), key="eph_date_v104", format="DD/MM/YYYY")
     with c_btn:
-        search = st.button("🔎 BUSCAR EFEMÉRIDES", type="primary", use_container_width=True, key="search_eph_v104")
+        search = st.button("🔎 BUSCAR EFEMÉRIDES", type="primary", width="stretch", key="search_eph_v104")
 
     if search:
         results = {}
@@ -1056,7 +1056,7 @@ elif tool == "Efemérides precisas":
                         cols = st.columns([1.1, 3.1, .8], vertical_alignment="center")
                         cols[0].markdown(f"**{p.source}** · {p.kind}")
                         cols[1].caption(p.filename)
-                        cols[2].link_button("⬇", p.url, use_container_width=True)
+                        cols[2].link_button("⬇", p.url, width="stretch")
             if not any_alt:
                 st.caption("No hay alternativas adicionales verificadas en este momento.")
 
