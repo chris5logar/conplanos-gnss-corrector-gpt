@@ -442,7 +442,7 @@ _COLUMN_ALIASES: dict[str, list[str]] = {
         "codigo", "código", "code", "feature code", "descripcion", "descripción", "desc", "codigo punto",
     ],
     "base": [
-        "base", "n s de la base del gnss", "ns de la base del gnss",
+        "n s de la base del gnss", "ns de la base del gnss", "base",
         "identificacion de base gnss", "identificación de base gnss",
         "base gnss", "nombre de base", "base name", "estacion base", "estación base",
     ],
