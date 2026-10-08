@@ -6,6 +6,7 @@ on:
       - 'core.py'
       - 'verify_local.py'
       - 'gnss_corrector_ui.py'
+      - 'gnss_generator_ui.py'
       - 'cad_export.py'
       - 'requirements.txt'
       - '.github/workflows/gnss-checks.yml'
@@ -25,6 +26,6 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
       - name: Compile modules
-        run: python -m compileall -q app.py core.py gnss_corrector_ui.py cad_export.py verify_local.py certificate.py ephemeris.py history.py drive.py
+        run: python -m compileall -q app.py core.py gnss_corrector_ui.py gnss_generator_ui.py cad_export.py verify_local.py certificate.py ephemeris.py history.py drive.py
       - name: Run GNSS regression suite
         run: python verify_local.py
