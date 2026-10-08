@@ -381,10 +381,11 @@ if tool != "Corrector GNSS":
 if tool == "Corrector GNSS":
     from ui_runtime import load_ui_module
     try:
-        load_ui_module("gnss_corrector_ui", VERSION).render_corrector()
+        _current_screen = load_ui_module("gnss_corrector_ui", VERSION)
     except RuntimeError as exc:
         st.error(f"⚠️ Versión inconsistente de la interfaz: {exc}")
         st.stop()
+    _current_screen.render_corrector()
 
 
 # ========================================================
@@ -393,10 +394,13 @@ if tool == "Corrector GNSS":
 elif tool == "Generador de data":
     from ui_runtime import load_ui_module
     try:
-        load_ui_module("gnss_generator_ui", VERSION).render_generator()
+        # This screen imports shared styles from gnss_corrector_ui.
+        load_ui_module("gnss_corrector_ui", VERSION)
+        _current_screen = load_ui_module("gnss_generator_ui", VERSION)
     except RuntimeError as exc:
         st.error(f"⚠️ Versión inconsistente de la interfaz: {exc}")
         st.stop()
+    _current_screen.render_generator()
 
 # ========================================================
 # Certificados
