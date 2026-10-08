@@ -13,8 +13,13 @@ import streamlit as st
 
 # The PDF reader's dataclass must be refreshed BEFORE importing core functions.
 # Streamlit reruns can keep an older core module after a GitHub deployment.
-from ui_runtime import ensure_core_schema as _ensure_core_schema
-_ensure_core_schema("10.6.8")
+import importlib as _gnss_importlib
+import ui_runtime as _gnss_runtime
+# The runtime loader may itself be cached from the previous deployment.
+if not hasattr(_gnss_runtime, "ensure_core_schema"):
+    _gnss_importlib.invalidate_caches()
+    _gnss_runtime = _gnss_importlib.reload(_gnss_runtime)
+_gnss_runtime.ensure_core_schema("10.6.8")
 
 from core import (
     apply_correction,
