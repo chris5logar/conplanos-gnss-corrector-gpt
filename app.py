@@ -68,7 +68,7 @@ from certificate import (
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 LOGO_PATH = TEMPLATES_DIR / "logo_conplanos.png"
-VERSION = "10.6.4"
+VERSION = "10.6.5"
 
 st.set_page_config(
     page_title="CONPLANOS GNSS",
@@ -387,151 +387,8 @@ if tool == "Corrector GNSS":
 # Generador de data
 # ========================================================
 elif tool == "Generador de data":
-    left, right = st.columns([2.25, 1.0], gap="large")
-    with left:
-        st.markdown('<div class="step">PASO 1</div>', unsafe_allow_html=True)
-        st.subheader("Sube una o varias datas nativas matriz")
-        gen_native_uploads = st.file_uploader(
-            "CSV nativos matriz", type=["csv"], accept_multiple_files=True,
-            label_visibility="collapsed", key="generator_native_v8",
-            help="El primer CSV actuará como plantilla maestra."
-        )
-    if not gen_native_uploads:
-        st.info("Sube una o varias datas nativas para comenzar.")
-    else:
-        gen_infos = []
-        for idx, f in enumerate(gen_native_uploads):
-            raw = f.getvalue()
-            try:
-                overrides = st.session_state.get(f"gen_col_override_{idx}")
-                csv_i = read_csv(raw, column_overrides=overrides)
-                gen_infos.append((f.name, csv_i))
-            except ValueError as exc:
-                if "columnas críticas" in str(exc).lower():
-                    overrides = prompt_manual_column_mapping(raw, f.name, f"gen_map_{idx}")
-                    if overrides:
-                        st.session_state[f"gen_col_override_{idx}"] = overrides
-                        try:
-                            csv_i = read_csv(raw, column_overrides=overrides)
-                            gen_infos.append((f.name, csv_i))
-                        except Exception as ex2:
-                            status(f"🔴 {f.name}: {ex2}", "bad")
-                else:
-                    status(f"🔴 {f.name}: {exc}", "bad")
-            except Exception as exc:
-                status(f"🔴 {f.name}: {exc}", "bad")
-
-        if not gen_infos:
-            st.stop()
-        base_names = [i.base_name for _, i in gen_infos]
-        same_base = len({x.casefold() for x in base_names}) == 1
-        with right:
-            card(
-                "📋 Plantilla Maestra (Matriz)",
-                f"<b>{gen_infos[0][0]}</b><br>"
-                f"Bases: {len(gen_infos)} · Filas plantilla: {len(gen_infos[0][1].rows)}<br>"
-                f"Base principal: <b>{gen_infos[0][1].base_name}</b>"
-            )
-            status("🟢 Base común lista para unir." if same_base else "🔴 Bases diferentes: no se generará un único proyecto.", "ok" if same_base else "bad")
-        with st.expander("📍 Ver coordenadas de las bases", expanded=True):
-            for n, i in gen_infos:
-                st.markdown(
-                    f'<div class="card" style="border:2px solid #0f766e;background:#f0fdfa;">'
-                    f'<div class="card-title">{n} · BASE {i.base_name}</div>'
-                    f'<div class="small"><b>E:</b> {i.base_original_e:.4f} m &nbsp; <b>N:</b> {i.base_original_n:.4f} m &nbsp; <b>H:</b> {i.base_original_h:.4f} m</div></div>',
-                    unsafe_allow_html=True,
-                )
-
-        st.markdown('<div class="step">PASO 2</div>', unsafe_allow_html=True)
-        st.subheader("Sube las coordenadas finales del plano")
-        st.caption("Admite CSV, Excel, PDF, memoria descriptiva DOCX y PDF, JPG/PNG/WebP. Puedes subir varios archivos; la aplicación intentará identificar automáticamente Este/E y Norte/N.")
-        plan_uploads = st.file_uploader(
-            "Fuentes de coordenadas", type=["csv", "xlsx", "xlsm", "pdf", "docx", "png", "jpg", "jpeg", "webp", "tif", "tiff", "bmp"],
-            accept_multiple_files=True, label_visibility="collapsed", key="generator_plan_v8",
-        )
-        if not plan_uploads:
-            st.info("Sube al menos un archivo de coordenadas del plano.")
-        else:
-            sources = [(f.name, f.getvalue()) for f in plan_uploads]
-            points, diagnostics = extract_coordinate_sources(sources)
-            st.dataframe(diagnostics, use_container_width=True, hide_index=True)
-            valid_points = [p for p in points if p.e is not None and p.n is not None]
-            st.markdown("**Coordenadas interpretadas por CONPLANOS**")
-            st.dataframe(
-                [
-                    {"Fuente": p.source or "—", "Nombre detectado": p.name or "—", "Este (E)": round(p.e, 4), "Norte (N)": round(p.n, 4), "Zona": p.zone or "—"}
-                    for p in valid_points
-                ],
-                use_container_width=True, hide_index=True,
-            )
-            t1, t2, t3 = st.columns(3)
-            t1.metric("Coordenadas leídas", len(valid_points))
-            tolerance = t2.number_input(
-                "Tolerancia de coincidencia (m)", min_value=0.0, max_value=1.0, value=0.0000,
-                step=0.001, format="%.4f", key="gen_tol_v8",
-                help="0.0000 exige coincidencia exacta según los valores numéricos disponibles."
-            )
-            neighbors = t3.number_input("Vecinos IDW de respaldo", min_value=3, max_value=16, value=6, step=1, key="gen_neighbors_v8")
-
-            with right:
-                card("🧩 Regla de generación", "🟢 Coincidente → conserva fila nativa.<br>🔵 Nueva → E/N del plano + H interpolada.<br>🛰️ Base → siempre primera y única.<br>🔢 Punto 1, 2, 3… → secuencia continua.<br>📡 Observación → 60 (si existe en la plantilla).<br>📋 Método de encuesta → Topográfico (si existe).")
-                card("⛰️ Naturaleza estimada de datos", "Dentro de la envolvente de los puntos nativos se usa una red TIN (Delaunay) e interpolación lineal. Fuera de esa envolvente se usa IDW como respaldo.<br><b>Atención:</b> Las alturas son estimadas matemáticamente. Los parámetros observados (PDOP, RMS, precisiones) se mantienen vacíos en puntos sintéticos.")
-
-            st.markdown('<div class="step">PASO 3</div>', unsafe_allow_html=True)
-            if st.button("🧩 GENERAR DATA DERIVADA", type="primary", use_container_width=True, key="generate_data_v8"):
-                if not same_base:
-                    st.error("Para generar un único proyecto debes usar una sola base común en las datas nativas.")
-                else:
-                    try:
-                        native_raws = [f.getvalue() for f in gen_native_uploads]
-                        native_joined, _ = merge_csv_payloads(native_raws, require_same_base=True)
-                        combined_info = read_csv(native_joined)
-                        out, summary = generate_derived_data(
-                            combined_info, valid_points,
-                            match_tolerance_m=float(tolerance), idw_neighbors=int(neighbors)
-                        )
-                        by_source = defaultdict(list)
-                        for p in valid_points:
-                            by_source[p.source or "Coordenadas"].append(p)
-                        separate = []
-                        for src, pts in by_source.items():
-                            b, s = generate_derived_data(combined_info, pts, match_tolerance_m=float(tolerance), idw_neighbors=int(neighbors))
-                            safe = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(src).stem)[:70]
-                            separate.append((safe, b, generated_data_filename(safe + ".csv"), s))
-                        native_joined_updated, _ = native_updated(combined_info)
-                        package = [("DATA_GENERADA_UNIDA.csv", out), ("NATIVA_ACTUALIZADA_UNIDA.csv", native_joined_updated)]
-                        package.extend((f"SEPARADO_{name}.csv", b) for name, b, _, _ in separate)
-                        st.session_state["generator_result_v8"] = {
-                            "out": out,
-                            "summary": summary,
-                            "separate": separate,
-                            "native": native_joined_updated,
-                            "package": zip_artifacts(package),
-                        }
-                        st.success("✅ Data derivada generada. Las descargas quedaron persistentes.")
-                    except Exception as exc:
-                        st.error(f"No se pudo generar la data derivada: {exc}")
-
-            result = st.session_state.get("generator_result_v8")
-            if result:
-                s = result["summary"]
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Entrada", s["input_points"])
-                c2.metric("Coincidentes", s["matched_points"])
-                c3.metric("Nuevos", s["generated_points"])
-                c4.metric("Dist. media", f"{s['mean_nearest_distance_m']:.4f} m")
-                st.caption("Métodos de altura: " + ", ".join(f"{k}: {v}" for k, v in s.get("interpolation_methods", {}).items()) if s.get("interpolation_methods") else "No hubo puntos nuevos que interpolar.")
-                db1, db2, db3 = st.columns(3)
-                db1.download_button("⬇️ DATA GENERADA UNIDA", result["out"], file_name="CONPLANOS_DATA_GENERADA_UNIDA.csv", mime="text/csv", use_container_width=True, on_click="ignore", key="gen_union_v8")
-                db2.download_button("⬇️ NATIVA ACTUALIZADA UNIDA", result["native"], file_name="CONPLANOS_NATIVA_ACTUALIZADA_UNIDA.csv", mime="text/csv", use_container_width=True, on_click="ignore", key="gen_native_v8")
-                db3.download_button("📦 DESCARGAR TODO (ZIP)", result["package"], file_name="CONPLANOS_GENERADOR_RESULTADOS.zip", mime="application/zip", use_container_width=True, on_click="ignore", key="gen_zip_v8")
-                if result["separate"]:
-                    st.markdown('<div class="download-head">📥 Resultados separados por archivo/fuente</div>', unsafe_allow_html=True)
-                    for idx, (name, b, _, ss) in enumerate(result["separate"]):
-                        st.download_button(f"⬇️ {name}", b, file_name=f"{name}_DATA_GENERADA.csv", mime="text/csv", use_container_width=True, on_click="ignore", key=f"gen_sep_{idx}_v8")
-                if st.button("🧹 Limpiar resultados del generador", key="clear_gen_v8"):
-                    st.session_state.pop("generator_result_v8", None)
-                    st.rerun()
+    from gnss_generator_ui import render_generator
+    render_generator()
 
 # ========================================================
 # Certificados
