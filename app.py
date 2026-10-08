@@ -68,7 +68,7 @@ from certificate import (
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 LOGO_PATH = TEMPLATES_DIR / "logo_conplanos.png"
-VERSION = "10.6.5"
+VERSION = "10.6.6"
 
 st.set_page_config(
     page_title="CONPLANOS GNSS",
