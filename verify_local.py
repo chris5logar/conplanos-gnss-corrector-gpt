@@ -207,14 +207,14 @@ def test_corrector_dashboard_regressions():
     import ast
     source = Path("app.py").read_text(encoding="utf-8")
     ast.parse(source)
-    assert 'VERSION = "10.6.5"' in source
+    assert 'VERSION = "10.6.6"' in source
     ui = Path("gnss_corrector_ui.py").read_text(encoding="utf-8")
     assert 'key="corrector_native_v8"' in ui
     assert 'key="corrector_reports_v8"' in ui
     assert 'from gnss_corrector_ui import render_corrector' in source
     assert 'len({base_coord_signature})' not in source
     ui = Path("gnss_corrector_ui.py").read_text(encoding="utf-8")
-    assert '↓ NATIVA ACTUALIZADA' in ui and '↓ CORREGIDA CSV' in ui
+    assert '↓ DATA RTK NATIVA ACTUALIZADA' in ui and '↓ DATA RTK CORREGIDA CSV' in ui
     assert 'TIEMPO DE LECTURA' in ui and 'Distancia geométrica' in ui
     assert 'CALIDAD DE PUNTOS MÓVILES' in ui and 'PRECISIONES Y ERRORES DEL INFORME' in ui
     assert 'Google Maps Embed' not in source and 'Google Maps Embed' not in ui
@@ -295,7 +295,7 @@ def test_gnss_coordinate_cards_mobile_and_reference():
     mobile_html = _report_coordinate_card(rep, "mobile")
     ref_html = _report_coordinate_card(rep, "reference")
     assert "PUNTO GEODÉSICO ELABORADO" in mobile_html
-    assert "ERP · ESTACIÓN DE REFERENCIA" in ref_html
+    assert "ERP · ESTACIÓN DE RASTREO PERMANENTE" in ref_html
     assert "Ruth Ccatca" in mobile_html and "CS01" in ref_html
     assert "UTM WGS84 · Zona 18S" in mobile_html
     for expected in ("222259.4808 m", "8494579.9537 m",
@@ -366,6 +366,44 @@ def test_generator_professional_ui_without_changing_data_math():
     assert "puntos sin solución FIX" not in ui.lower()  # no automatic FIX fabrication
     print("PASS 12: generator professional UI, master matrix and existing exports")
 
+
+def test_download_naming_and_km_baseline_review():
+    """Correct filename suffixes and visual km alerts without altering CSV/DXF bytes."""
+    from gnss_corrector_ui import (
+        _original_project_name, _correction_filenames, _baseline_distance_status,
+        _baseline_tile,
+    )
+    assert _original_project_name("Ruth ccatca NATIVO sinCorr.csv") == "Ruth ccatca"
+    assert _original_project_name("Ruth ccatca sinCorreccion RTK corregida.csv") == "Ruth ccatca"
+    assert _original_project_name("LOTE EL OLIVO.csv") == "LOTE EL OLIVO"
+    assert _correction_filenames("Ruth ccatca NATIVO sinCorr.csv") == (
+        "Ruth ccatca RTK nativo.csv",
+        "Ruth ccatca RTK corregido.csv",
+        "Ruth ccatca Polígono corregido.csv",
+        "Ruth ccatca Polígono corregido.dxf",
+    )
+    assert _correction_filenames("Lote 15.csv")[3] == "Lote 15 Polígono corregido.dxf"
+    assert _baseline_distance_status(None) == ("—", "unknown")
+    assert _baseline_distance_status(43769.514) == ("43.770 km", "ok")
+    assert _baseline_distance_status(80000.0) == ("80.000 km", "ok")
+    assert _baseline_distance_status(80000.01)[1] == "caution"
+    assert _baseline_distance_status(100000.0)[1] == "caution"
+    assert _baseline_distance_status(100000.01)[1] == "danger"
+    assert _baseline_distance_status(float("nan"))[1] == "unknown"
+    assert "cp-tile--danger" in _baseline_tile(110000.0)
+    assert "110.000 km" in _baseline_tile(110000.0)
+    assert "cp-tile--caution" in _baseline_tile(95000.0)
+    ui = Path("gnss_corrector_ui.py").read_text(encoding="utf-8")
+    assert "01 · LEVANTAMIENTO RTK GNSS NATIVO" in ui
+    assert "02 · PROCESAMIENTO DEL PUNTO GEODÉSICO GNSS" in ui
+    assert "RESUMEN DEL INFORME GNSS" in ui
+    assert "80 km" in ui and "100 km" in ui
+    assert ui.index('_report_coordinate_card(rep, "reference")') < ui.index('_report_coordinate_card(rep, "mobile")')
+    for label in ("DATA RTK NATIVA ACTUALIZADA", "DATA RTK CORREGIDA CSV",
+                  "POLÍGONO CORREGIDO CSV", "POLÍGONO CORREGIDO DXF"):
+        assert label in ui
+    print("PASS 13: clean project names, RTK/DXF downloads and km baseline thresholds")
+
 def main():
     test_column_order_and_preservation()
     test_synonyms_and_varied_equipment()
@@ -379,6 +417,7 @@ def main():
     test_gnss_coordinate_cards_mobile_and_reference()
     test_report_reference_geographic_extraction()
     test_generator_professional_ui_without_changing_data_math()
+    test_download_naming_and_km_baseline_review()
     print("\n✅ ALL TESTS PASSED SUCCESSFULLY!")
 
 
