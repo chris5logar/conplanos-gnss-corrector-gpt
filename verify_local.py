@@ -352,7 +352,7 @@ def test_generator_professional_ui_without_changing_data_math():
     app = Path("app.py").read_text(encoding="utf-8")
     ui = Path("gnss_generator_ui.py").read_text(encoding="utf-8")
     ast.parse(ui)
-    assert "from gnss_generator_ui import render_generator" in app
+    assert 'load_ui_module("gnss_generator_ui", VERSION)' in app
     assert 'key="generator_native_v8"' in ui
     assert 'key="generator_plan_v8"' in ui
     assert 'key="gen_tol_v8"' in ui
