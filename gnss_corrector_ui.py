@@ -6,6 +6,8 @@ import hashlib
 import html
 import io
 import math
+import re
+from pathlib import Path
 import unicodedata
 
 import streamlit as st
@@ -115,6 +117,16 @@ border-bottom:1px solid rgba(111,127,135,.18);padding-bottom:.26rem;margin-botto
 .cp-coordinate-item strong{font-size:.75rem;font-weight:850;text-align:right;overflow-wrap:anywhere;line-height:1.34}
 .cp-coordinate-item--emphasis{background:rgba(15,133,122,.045);border-radius:5px}
 .cp-geo-card--mobile .cp-coordinate-item--emphasis strong{font-size:.81rem}
+.cp-tile--baseline{border:1px solid transparent}
+.cp-tile--ok{border-color:rgba(14,126,96,.35);background:rgba(27,151,109,.08)}
+.cp-tile--caution{border-color:rgba(209,149,31,.57);background:rgba(228,168,48,.16)}
+.cp-tile--danger{border-color:rgba(199,50,50,.7);background:rgba(215,50,50,.12)}
+.cp-tile--danger b{color:#d43c3c;font-weight:900}
+.cp-tile--caution b{color:#9c6700}
+.cp-geo-grid{grid-template-columns:1fr;gap:.45rem}
+.cp-geo-card{padding:.5rem .67rem .44rem}
+.cp-coordinate-stack{gap:.05rem}
+.cp-geo-card--mobile{border-width:2px}
 @media(max-width:660px){.cp-geo-grid{grid-template-columns:1fr}}
 
 .cp-geo-note{font-size:.6rem;line-height:1.35;opacity:.68;margin:.2rem 0 .4rem}
@@ -223,6 +235,53 @@ def _lat_lon(e, n, zone, hemisphere):
 
 
 
+
+def _original_project_name(filename: str) -> str:
+    """Remove previous processing suffixes, preserving the project's actual name."""
+    text = Path(filename.replace(chr(92), "/")).stem.strip()
+    suffix = re.compile(
+        r"(?i)[\s_.-]+(?:sin[\s_-]*corr(?:egir|eccion|ección)?|"
+        r"nativ[oa]|actualizad[oa]|corregid[oa]|pol[ií]gono|rtk|cpimp)$"
+    )
+    for _ in range(12):
+        cleaned = suffix.sub("", text).strip(" ._-")
+        if cleaned == text:
+            break
+        text = cleaned
+    return text or Path(filename).stem.strip() or "CONPLANOS"
+
+
+def _correction_filenames(filename: str) -> tuple[str, str, str, str]:
+    base = _original_project_name(filename)
+    return (
+        f"{base} RTK nativo.csv",
+        f"{base} RTK corregido.csv",
+        f"{base} Polígono corregido.csv",
+        f"{base} Polígono corregido.dxf",
+    )
+
+
+def _baseline_distance_status(distance_m: float | None):
+    """Advisory review thresholds, not a universal engineering restriction."""
+    if distance_m is None:
+        return "—", "unknown"
+    try:
+        km = float(distance_m) / 1000.0
+    except (TypeError, ValueError):
+        return "—", "unknown"
+    if not math.isfinite(km) or km < 0:
+        return "—", "unknown"
+    return f"{km:.3f} km", ("danger" if km > 100 else "caution" if km > 80 else "ok")
+
+
+def _baseline_tile(distance_m):
+    value, level = _baseline_distance_status(distance_m)
+    return (
+        '<div class="cp-tile cp-tile--baseline cp-tile--' + level +
+        '"><small>DISTANCIA ERP–PUNTO</small><b>' + _esc(value) + '</b></div>'
+    )
+
+
 def _report_coordinate_card(report, kind: str) -> str:
     """Professional geodetic summary: mobile UTM + geographic, ERP geographic.
 
@@ -265,7 +324,7 @@ def _report_coordinate_card(report, kind: str) -> str:
                 + '"><span>' + _esc(label) + '</span><strong>'
                 + _esc(value) + '</strong></div>')
 
-    label = "PUNTO GEODÉSICO ELABORADO" if is_mobile else "ERP · ESTACIÓN DE REFERENCIA"
+    label = "PUNTO GEODÉSICO ELABORADO" if is_mobile else "ERP · ESTACIÓN DE RASTREO PERMANENTE"
     css_class = "cp-geo-card cp-geo-card--mobile" if is_mobile else "cp-geo-card cp-geo-card--reference"
     content = (
         '<article class="' + css_class + '">'
@@ -307,13 +366,13 @@ def _read_report_uploads(pdfs):
 
 def render_corrector():
     _show_styles()
-    st.markdown('<div class="cp-heading"><h2>Corrección GNSS</h2><span>CONPLANOS · RTK / ESTÁTICO · V10.6.5</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="cp-heading"><h2>Corrección GNSS</h2><span>CONPLANOS · RTK / ESTÁTICO · V10.6.6</span></div>', unsafe_allow_html=True)
 
     # 01. El resumen del CSV se coloca en su misma fila.
     source_left, source_right = st.columns([1.35, 1], gap="medium")
     infos = []
     with source_left:
-        st.markdown('<div class="cp-tag">01 · LEVANTAMIENTO GNSS</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cp-tag">01 · LEVANTAMIENTO RTK GNSS NATIVO</div>', unsafe_allow_html=True)
         st.caption("Sube el CSV nativo. El primero será la plantilla de todas las descargas.")
         uploads = st.file_uploader("CSV nativo", type=["csv"], accept_multiple_files=True,
                                    label_visibility="collapsed", key="corrector_native_v8")
@@ -374,8 +433,8 @@ def render_corrector():
     mode = "PDF"
     reports = []
     with pdf_left:
-        st.markdown('<div class="cp-tag">02 · PROCESAMIENTO GNSS DEL PUNTO GEODÉSICO</div>', unsafe_allow_html=True)
-        st.caption("Adjunta el informe GNSS del punto geodésico o introduce las coordenadas manuales.")
+        st.markdown('<div class="cp-tag">02 · PROCESAMIENTO DEL PUNTO GEODÉSICO GNSS</div>', unsafe_allow_html=True)
+        st.caption("Carga el informe Leica del punto geodésico procesado o introduce sus coordenadas corregidas.")
         pdfs = st.file_uploader("Informes Leica", type=["pdf"], accept_multiple_files=True,
                                 label_visibility="collapsed", key="corrector_reports_v8")
         reports = _read_report_uploads(pdfs)
@@ -439,7 +498,7 @@ def render_corrector():
         if rep is None and reports:
             rep_file, rep = reports[0]
         if not rep:
-            st.markdown(_panel("RESUMEN DEL PROCESAMIENTO", '<p class="cp-footnote">Sube un informe PDF para ver la línea base, duración, equipos y errores reportados.</p>'), unsafe_allow_html=True)
+            st.markdown(_panel("RESUMEN DEL INFORME GNSS", '<p class="cp-footnote">Sube el informe Leica para identificar la ERP, el punto geodésico, duración y calidad.</p>'), unsafe_allow_html=True)
         else:
             zone, hemi = rep.utm_zone, rep.utm_hemisphere or "S"
             reference_geo = _lat_lon(rep.reference_e, rep.reference_n, zone, hemi)
@@ -452,18 +511,26 @@ def render_corrector():
             body = _line("Informe", rep_file)
             body += _line("Base de referencia", rep.reference_name)
             body += _line("Punto móvil", rep.mobile_name)
-            body += _tiles([("TIEMPO DE LECTURA", rep.solution_duration or rep.duration or "—"),
-                            ("DISTANCIA", f"{distance:.3f} m" if distance is not None else "—"),
-                            ("SOLUCIÓN", rep.solution_type or rep.solution_state or "—")])
+            body += (
+                '<div class="cp-tiles">'
+                + '<div class="cp-tile"><small>TIEMPO DE LECTURA</small><b>'
+                + _esc(rep.solution_duration or rep.duration or "—") + '</b></div>'
+                + _baseline_tile(distance)
+                + '<div class="cp-tile"><small>SOLUCIÓN</small><b>'
+                + _esc(rep.solution_type or rep.solution_state or "—") + '</b></div>'
+                + '</div>'
+            )
+            if dist_caption != "Distancia geométrica":
+                body += _line("Tipo de distancia", "Horizontal calculada desde UTM")
             body += _section("EQUIPOS · RECEPTOR / ANTENA")
             body += _line("Receptor base", rep.reference_receiver) + _line("Receptor móvil", rep.mobile_receiver)
             body += _line("Antena base", rep.reference_antenna) + _line("Antena móvil", rep.mobile_antenna)
             body += _line("Altura antena móvil", f"{rep.mobile_antenna_height_m:.4f} m" if rep.mobile_antenna_height_m is not None else "—")
-            body += _section("COORDENADAS GEODÉSICAS · PUNTO ELABORADO Y ERP")
+            body += _section("COORDENADAS DE LA ERP Y DEL PUNTO GEODÉSICO")
             body += (
                 '<div class="cp-geo-grid">'
-                + _report_coordinate_card(rep, "mobile")
                 + _report_coordinate_card(rep, "reference")
+                + _report_coordinate_card(rep, "mobile")
                 + '</div>'
             )
             body += (
@@ -490,7 +557,12 @@ def render_corrector():
                     body += _line("ΔE / ΔN / ΔH",
                                   f"{e-original.base_original_e:+.4f} / {n-original.base_original_n:+.4f} / {h-original.base_original_h:+.4f} m")
             body += '<p class="cp-footnote">La zona UTM debe estar identificada para convertir latitud/longitud. CQ no equivale a errores X/Y/Z.</p>'
-            st.markdown(_panel("RESUMEN DEL PROCESAMIENTO", body), unsafe_allow_html=True)
+            st.markdown(_panel("RESUMEN DEL INFORME GNSS", body), unsafe_allow_html=True)
+            _, baseline_level = _baseline_distance_status(distance)
+            if baseline_level == "danger":
+                st.error("🔴 Línea base superior a 100 km. Supera el umbral de revisión configurado: verifica el procesamiento y los requisitos técnicos aplicables.")
+            elif baseline_level == "caution":
+                st.warning("🟡 Línea base superior a 80 km. Revisa el procesamiento, la calidad y los requisitos técnicos aplicables.")
             if not _fixed(rep.solution_type or rep.solution_state):
                 st.error("🔴 ADVERTENCIA CRÍTICA: la solución del PDF no se ha identificado como FIJA. Verifica el procesamiento antes de certificar.")
 
@@ -536,10 +608,7 @@ def render_corrector():
                 corrected_b, polygon_b, calc = apply_correction(info, float(e), float(n), float(h))
                 native_b, _ = native_updated(info)
                 dxf = export_corrected_dxf(read_csv(corrected_b))
-                filenames = (
-                    native_updated_filename(name), corrected_filename(name),
-                    polygon_filename(name), name.rsplit(".", 1)[0] + "_POLIGONO_CPimp.dxf"
-                )
+                filenames = _correction_filenames(name)
                 results.append((name, native_b, corrected_b, polygon_b, dxf, filenames, calc))
                 native_all.append(native_b)
                 corrected_all.append(corrected_b)
@@ -568,10 +637,10 @@ def render_corrector():
                     p_all, _ = merge_csv_payloads(polygon_all)
                     combined = (n_all, c_all, p_all)
                     bundle.extend([
-                        ("NATIVA_ACTUALIZADA_UNIDA.csv", n_all),
-                        ("CORREGIDA_UNIDA.csv", c_all),
-                        ("POLIGONO_UNIDO.csv", p_all),
-                        ("POLIGONO_UNIDO_CPimp.dxf", export_corrected_dxf(read_csv(c_all))),
+                        ("CONPLANOS RTK nativo unido.csv", n_all),
+                        ("CONPLANOS RTK corregido unido.csv", c_all),
+                        ("CONPLANOS Polígono corregido unido.csv", p_all),
+                        ("CONPLANOS Polígono corregido unido.dxf", export_corrected_dxf(read_csv(c_all))),
                     ])
                 except Exception as exc:
                     st.warning(f"No se pudieron unir los archivos: {exc}")
@@ -588,10 +657,10 @@ def render_corrector():
                 st.markdown("**" + name + "**")
             c1, c2, c3, c4 = st.columns(4, gap="small")
             for column, label, data, filename, mime, suffix in (
-                (c1, "↓ NATIVA ACTUALIZADA", native_b, files[0], "text/csv", "n"),
-                (c2, "↓ CORREGIDA CSV", corrected_b, files[1], "text/csv", "c"),
-                (c3, "↓ POLÍGONO CSV", polygon_b, files[2], "text/csv", "p"),
-                (c4, "↓ POLÍGONO DXF", dxf_b, files[3], "application/dxf", "d"),
+                (c1, "↓ DATA RTK NATIVA ACTUALIZADA", native_b, files[0], "text/csv", "n"),
+                (c2, "↓ DATA RTK CORREGIDA CSV", corrected_b, files[1], "text/csv", "c"),
+                (c3, "↓ POLÍGONO CORREGIDO CSV", polygon_b, files[2], "text/csv", "p"),
+                (c4, "↓ POLÍGONO CORREGIDO DXF", dxf_b, files[3], "application/dxf", "d"),
             ):
                 with column:
                     st.download_button(label, data, file_name=filename, mime=mime,
@@ -604,16 +673,16 @@ def render_corrector():
         d1, d2 = st.columns([1, 2], gap="small")
         with d1:
             st.download_button("↓ TODO EN ZIP + ORIGINALES + AUDITORÍA", all_zip,
-                               file_name="CONPLANOS_CORRECCION_GNSS_COMPLETA.zip",
+                               file_name=(_original_project_name(infos[0][0]) + " RTK completo.zip" if len(infos) == 1 else "CONPLANOS RTK completo.zip"),
                                mime="application/zip", use_container_width=True,
                                on_click="ignore", key="cp_zip_v1063")
         if combined:
             with d2:
                 with st.expander("Descargas combinadas (misma base)", expanded=False):
                     cc1, cc2 = st.columns(2)
-                    cc1.download_button("↓ NATIVA UNIDA", combined[0],
-                                       file_name="NATIVA_ACTUALIZADA_UNIDA.csv",
+                    cc1.download_button("↓ DATA RTK NATIVA UNIDA", combined[0],
+                                       file_name="CONPLANOS RTK nativo unido.csv",
                                        mime="text/csv", on_click="ignore", key="cp_merged_native_1063")
-                    cc2.download_button("↓ CORREGIDA UNIDA", combined[1],
-                                       file_name="CORREGIDA_UNIDA.csv",
+                    cc2.download_button("↓ DATA RTK CORREGIDA UNIDA", combined[1],
+                                       file_name="CONPLANOS RTK corregido unido.csv",
                                        mime="text/csv", on_click="ignore", key="cp_merged_corr_1063")
