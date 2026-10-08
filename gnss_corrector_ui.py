@@ -366,13 +366,13 @@ def _read_report_uploads(pdfs):
 
 def render_corrector():
     _show_styles()
-    st.markdown('<div class="cp-heading"><h2>Corrección GNSS</h2><span>CONPLANOS · RTK / ESTÁTICO · V10.6.5</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="cp-heading"><h2>Corrección GNSS</h2><span>CONPLANOS · RTK / ESTÁTICO · V10.6.6</span></div>', unsafe_allow_html=True)
 
     # 01. El resumen del CSV se coloca en su misma fila.
     source_left, source_right = st.columns([1.35, 1], gap="medium")
     infos = []
     with source_left:
-        st.markdown('<div class="cp-tag">01 · LEVANTAMIENTO GNSS</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cp-tag">01 · LEVANTAMIENTO RTK GNSS NATIVO</div>', unsafe_allow_html=True)
         st.caption("Sube el CSV nativo. El primero será la plantilla de todas las descargas.")
         uploads = st.file_uploader("CSV nativo", type=["csv"], accept_multiple_files=True,
                                    label_visibility="collapsed", key="corrector_native_v8")
@@ -433,8 +433,8 @@ def render_corrector():
     mode = "PDF"
     reports = []
     with pdf_left:
-        st.markdown('<div class="cp-tag">02 · PROCESAMIENTO GNSS DEL PUNTO GEODÉSICO</div>', unsafe_allow_html=True)
-        st.caption("Adjunta el informe GNSS del punto geodésico o introduce las coordenadas manuales.")
+        st.markdown('<div class="cp-tag">02 · PROCESAMIENTO GNSS DEL PUNTO GEODÉSICO · COORDENADAS CORREGIDAS</div>', unsafe_allow_html=True)
+        st.caption("Carga el informe Leica del punto geodésico procesado o introduce sus coordenadas corregidas.")
         pdfs = st.file_uploader("Informes Leica", type=["pdf"], accept_multiple_files=True,
                                 label_visibility="collapsed", key="corrector_reports_v8")
         reports = _read_report_uploads(pdfs)
@@ -498,7 +498,7 @@ def render_corrector():
         if rep is None and reports:
             rep_file, rep = reports[0]
         if not rep:
-            st.markdown(_panel("RESUMEN DEL PROCESAMIENTO", '<p class="cp-footnote">Sube un informe PDF para ver la línea base, duración, equipos y errores reportados.</p>'), unsafe_allow_html=True)
+            st.markdown(_panel("RESUMEN DEL INFORME GNSS", '<p class="cp-footnote">Sube el informe Leica para identificar la ERP, el punto geodésico, duración y calidad.</p>'), unsafe_allow_html=True)
         else:
             zone, hemi = rep.utm_zone, rep.utm_hemisphere or "S"
             reference_geo = _lat_lon(rep.reference_e, rep.reference_n, zone, hemi)
@@ -518,11 +518,11 @@ def render_corrector():
             body += _line("Receptor base", rep.reference_receiver) + _line("Receptor móvil", rep.mobile_receiver)
             body += _line("Antena base", rep.reference_antenna) + _line("Antena móvil", rep.mobile_antenna)
             body += _line("Altura antena móvil", f"{rep.mobile_antenna_height_m:.4f} m" if rep.mobile_antenna_height_m is not None else "—")
-            body += _section("COORDENADAS GEODÉSICAS · PUNTO ELABORADO Y ERP")
+            body += _section("COORDENADAS DE LA ERP Y DEL PUNTO GEODÉSICO")
             body += (
                 '<div class="cp-geo-grid">'
-                + _report_coordinate_card(rep, "mobile")
                 + _report_coordinate_card(rep, "reference")
+                + _report_coordinate_card(rep, "mobile")
                 + '</div>'
             )
             body += (
@@ -549,7 +549,7 @@ def render_corrector():
                     body += _line("ΔE / ΔN / ΔH",
                                   f"{e-original.base_original_e:+.4f} / {n-original.base_original_n:+.4f} / {h-original.base_original_h:+.4f} m")
             body += '<p class="cp-footnote">La zona UTM debe estar identificada para convertir latitud/longitud. CQ no equivale a errores X/Y/Z.</p>'
-            st.markdown(_panel("RESUMEN DEL PROCESAMIENTO", body), unsafe_allow_html=True)
+            st.markdown(_panel("RESUMEN DEL INFORME GNSS", body), unsafe_allow_html=True)
             if not _fixed(rep.solution_type or rep.solution_state):
                 st.error("🔴 ADVERTENCIA CRÍTICA: la solución del PDF no se ha identificado como FIJA. Verifica el procesamiento antes de certificar.")
 
@@ -595,10 +595,7 @@ def render_corrector():
                 corrected_b, polygon_b, calc = apply_correction(info, float(e), float(n), float(h))
                 native_b, _ = native_updated(info)
                 dxf = export_corrected_dxf(read_csv(corrected_b))
-                filenames = (
-                    native_updated_filename(name), corrected_filename(name),
-                    polygon_filename(name), name.rsplit(".", 1)[0] + "_POLIGONO_CPimp.dxf"
-                )
+                filenames = _correction_filenames(name)
                 results.append((name, native_b, corrected_b, polygon_b, dxf, filenames, calc))
                 native_all.append(native_b)
                 corrected_all.append(corrected_b)
@@ -627,10 +624,10 @@ def render_corrector():
                     p_all, _ = merge_csv_payloads(polygon_all)
                     combined = (n_all, c_all, p_all)
                     bundle.extend([
-                        ("NATIVA_ACTUALIZADA_UNIDA.csv", n_all),
-                        ("CORREGIDA_UNIDA.csv", c_all),
-                        ("POLIGONO_UNIDO.csv", p_all),
-                        ("POLIGONO_UNIDO_CPimp.dxf", export_corrected_dxf(read_csv(c_all))),
+                        ("CONPLANOS RTK nativo unido.csv", n_all),
+                        ("CONPLANOS RTK corregido unido.csv", c_all),
+                        ("CONPLANOS Polígono corregido unido.csv", p_all),
+                        ("CONPLANOS Polígono corregido unido.dxf", export_corrected_dxf(read_csv(c_all))),
                     ])
                 except Exception as exc:
                     st.warning(f"No se pudieron unir los archivos: {exc}")
@@ -647,10 +644,10 @@ def render_corrector():
                 st.markdown("**" + name + "**")
             c1, c2, c3, c4 = st.columns(4, gap="small")
             for column, label, data, filename, mime, suffix in (
-                (c1, "↓ NATIVA ACTUALIZADA", native_b, files[0], "text/csv", "n"),
-                (c2, "↓ CORREGIDA CSV", corrected_b, files[1], "text/csv", "c"),
-                (c3, "↓ POLÍGONO CSV", polygon_b, files[2], "text/csv", "p"),
-                (c4, "↓ POLÍGONO DXF", dxf_b, files[3], "application/dxf", "d"),
+                (c1, "↓ DATA RTK NATIVA ACTUALIZADA", native_b, files[0], "text/csv", "n"),
+                (c2, "↓ DATA RTK CORREGIDA CSV", corrected_b, files[1], "text/csv", "c"),
+                (c3, "↓ POLÍGONO CORREGIDO CSV", polygon_b, files[2], "text/csv", "p"),
+                (c4, "↓ POLÍGONO CORREGIDO DXF", dxf_b, files[3], "application/dxf", "d"),
             ):
                 with column:
                     st.download_button(label, data, file_name=filename, mime=mime,
@@ -670,9 +667,9 @@ def render_corrector():
             with d2:
                 with st.expander("Descargas combinadas (misma base)", expanded=False):
                     cc1, cc2 = st.columns(2)
-                    cc1.download_button("↓ NATIVA UNIDA", combined[0],
-                                       file_name="NATIVA_ACTUALIZADA_UNIDA.csv",
+                    cc1.download_button("↓ DATA RTK NATIVA UNIDA", combined[0],
+                                       file_name="CONPLANOS RTK nativo unido.csv",
                                        mime="text/csv", on_click="ignore", key="cp_merged_native_1063")
-                    cc2.download_button("↓ CORREGIDA UNIDA", combined[1],
-                                       file_name="CORREGIDA_UNIDA.csv",
+                    cc2.download_button("↓ DATA RTK CORREGIDA UNIDA", combined[1],
+                                       file_name="CONPLANOS RTK corregido unido.csv",
                                        mime="text/csv", on_click="ignore", key="cp_merged_corr_1063")
