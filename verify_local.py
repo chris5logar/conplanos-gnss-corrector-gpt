@@ -213,7 +213,7 @@ def test_corrector_dashboard_regressions():
     assert 'len(set(signatures)) == 1' in source
     assert 'len({base_coord_signature})' not in source
     assert '↓ NATIVO' in source and '↓ CORREGIDO' in source and '↓ POLÍGONO DXF' in source
-    assert 'ESTÁTICO' in source and 'Distancia geométrica' in source
+    assert 'ESTÁTICO' in source and 'DISTANCIA' in source
     assert 'RESUMEN · CSV NATIVO' in source and 'RESUMEN · INFORME Y CORRECCIÓN' in source
     assert 'Google Maps Embed' not in source
     print("PASS 7: corporate two-row GNSS dashboard and CAD downloads")
