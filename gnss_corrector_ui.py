@@ -240,7 +240,7 @@ def _original_project_name(filename: str) -> str:
     """Remove previous processing suffixes, preserving the project's actual name."""
     text = Path(filename.replace(chr(92), "/")).stem.strip()
     suffix = re.compile(
-        r"(?i)[\\s_.-]+(?:sin[\\s_-]*corr(?:egir|eccion|ección)?|"
+        r"(?i)[\s_.-]+(?:sin[\s_-]*corr(?:egir|eccion|ección)?|"
         r"nativ[oa]|actualizad[oa]|corregid[oa]|pol[ií]gono|rtk|cpimp)$"
     )
     for _ in range(12):
@@ -511,9 +511,17 @@ def render_corrector():
             body = _line("Informe", rep_file)
             body += _line("Base de referencia", rep.reference_name)
             body += _line("Punto móvil", rep.mobile_name)
-            body += _tiles([("TIEMPO DE LECTURA", rep.solution_duration or rep.duration or "—"),
-                            ("DISTANCIA", f"{distance:.3f} m" if distance is not None else "—"),
-                            ("SOLUCIÓN", rep.solution_type or rep.solution_state or "—")])
+            body += (
+                '<div class="cp-tiles">'
+                + '<div class="cp-tile"><small>TIEMPO DE LECTURA</small><b>'
+                + _esc(rep.solution_duration or rep.duration or "—") + '</b></div>'
+                + _baseline_tile(distance)
+                + '<div class="cp-tile"><small>SOLUCIÓN</small><b>'
+                + _esc(rep.solution_type or rep.solution_state or "—") + '</b></div>'
+                + '</div>'
+            )
+            if dist_caption != "Distancia geométrica":
+                body += _line("Tipo de distancia", "Horizontal calculada desde UTM")
             body += _section("EQUIPOS · RECEPTOR / ANTENA")
             body += _line("Receptor base", rep.reference_receiver) + _line("Receptor móvil", rep.mobile_receiver)
             body += _line("Antena base", rep.reference_antenna) + _line("Antena móvil", rep.mobile_antenna)
@@ -550,6 +558,11 @@ def render_corrector():
                                   f"{e-original.base_original_e:+.4f} / {n-original.base_original_n:+.4f} / {h-original.base_original_h:+.4f} m")
             body += '<p class="cp-footnote">La zona UTM debe estar identificada para convertir latitud/longitud. CQ no equivale a errores X/Y/Z.</p>'
             st.markdown(_panel("RESUMEN DEL INFORME GNSS", body), unsafe_allow_html=True)
+            _, baseline_level = _baseline_distance_status(distance)
+            if baseline_level == "danger":
+                st.error("🔴 Línea base superior a 100 km. Supera el umbral de revisión configurado: verifica el procesamiento y los requisitos técnicos aplicables.")
+            elif baseline_level == "caution":
+                st.warning("🟡 Línea base superior a 80 km. Revisa el procesamiento, la calidad y los requisitos técnicos aplicables.")
             if not _fixed(rep.solution_type or rep.solution_state):
                 st.error("🔴 ADVERTENCIA CRÍTICA: la solución del PDF no se ha identificado como FIJA. Verifica el procesamiento antes de certificar.")
 
