@@ -427,13 +427,13 @@ def test_streamlit_runtime_ui_module_refresh():
     ast.parse(gen_source)
 
     # Pretend a Streamlit rerun kept this module from an earlier deployment.
-    old_function = legacy_corrector.render_corrector
+    stale_function = lambda: "OLD VIEW"
     legacy_corrector.UI_VERSION = "10.6.3"
-    legacy_corrector.render_corrector = lambda: "OLD VIEW"
+    legacy_corrector.render_corrector = stale_function
     fresh = load_ui_module("gnss_corrector_ui", "10.6.7")
     assert fresh.UI_VERSION == "10.6.7"
-    assert fresh.render_corrector is not legacy_corrector.render_corrector or fresh.render_corrector is old_function
-    assert fresh.render_corrector() != "OLD VIEW" if False else fresh.render_corrector.__name__ == "render_corrector"
+    assert fresh.render_corrector is not stale_function
+    assert fresh.render_corrector.__name__ == "render_corrector"
 
     legacy_generator.UI_VERSION = "10.6.5"
     generator = load_ui_module("gnss_generator_ui", "10.6.7")
