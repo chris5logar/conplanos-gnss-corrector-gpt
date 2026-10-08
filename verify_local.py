@@ -207,7 +207,7 @@ def test_corrector_dashboard_regressions():
     import ast
     source = Path("app.py").read_text(encoding="utf-8")
     ast.parse(source)
-    assert 'VERSION = "10.6.3"' in source
+    assert 'VERSION = "10.6.4"' in source
     ui = Path("gnss_corrector_ui.py").read_text(encoding="utf-8")
     assert 'key="corrector_native_v8"' in ui
     assert 'key="corrector_reports_v8"' in ui
@@ -278,6 +278,70 @@ def test_height_selection_nearest_20m():
     assert any("20" in x for x in far["warnings"])
     print("PASS 9: nearest ortho/ellip height selection and 20m warning")
 
+
+def test_gnss_coordinate_cards_mobile_and_reference():
+    """Card labels pair UTM with H ortho and geographic with h ellip for both stations."""
+    from core import ReportInfo
+    from gnss_corrector_ui import _report_coordinate_card
+    rep = ReportInfo(
+        utm_zone="18", utm_hemisphere="S",
+        mobile_name="Ruth Ccatca", mobile_e=222259.4808, mobile_n=8494579.9537,
+        mobile_h_ortho=3691.6519, mobile_h_ellip=3738.9468,
+        mobile_lat="13 36 15 S", mobile_lon="71 34 00 O",
+        reference_name="CS01", reference_e=177222.4, reference_n=8500000.4,
+        reference_h_ortho=3363.7346, reference_h_ellip=3410.0095,
+        reference_lat="13 30 00 S", reference_lon="71 40 00 O",
+    )
+    mobile_html = _report_coordinate_card(rep, "mobile")
+    ref_html = _report_coordinate_card(rep, "reference")
+    assert "PUNTO GEODÉSICO MÓVIL" in mobile_html
+    assert "ESTACIÓN DE REFERENCIA" in ref_html
+    assert "Ruth Ccatca" in mobile_html and "CS01" in ref_html
+    assert "UTM WGS84 · Zona 18S" in mobile_html
+    for expected in ("222259.4808 m", "8494579.9537 m",
+                     "3691.6519 m", "3738.9468 m", "13 36 15 S", "71 34 00 O"):
+        assert expected in mobile_html, expected
+    for expected in ("177222.4000 m", "8500000.4000 m",
+                     "3363.7346 m", "3410.0095 m", "13 30 00 S", "71 40 00 O"):
+        assert expected in ref_html, expected
+    assert "Latitud y longitud extraídas del PDF" in mobile_html
+    assert "Latitud y longitud extraídas del PDF" in ref_html
+    assert mobile_html.index("H ortométrica") < mobile_html.index("GEOGRÁFICAS · WGS84")
+    assert mobile_html.index("h elipsoidal") > mobile_html.index("GEOGRÁFICAS · WGS84")
+
+    # Explicit conversion only if both zone and hemisphere are available.
+    rep.reference_lat = rep.reference_lon = None
+    converted = _report_coordinate_card(rep, "reference")
+    assert "convertidas de UTM" in converted
+    rep.utm_hemisphere = None
+    missing = _report_coordinate_card(rep, "reference")
+    assert "sin conversión" in missing
+    assert "convertidas de UTM" not in missing
+    print("PASS 10: paired coordinate cards, correct heights, CRS and conversion provenance")
+
+
+def test_report_reference_geographic_extraction():
+    """Reference = first column and mobile = second; never confuse station roles."""
+    import fitz
+    from core import parse_report_pdfs
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text(
+        (40, 72),
+        "Latitud WGS84:\n-13.50000000\n-13.60416667\n"
+        "Longitud WGS84:\n-71.66666667\n-71.56666667\n"
+        "WGS84_UTM_18S",
+        fontsize=12,
+    )
+    report = parse_report_pdfs([("synthetic-coordinates.pdf", doc.tobytes())])
+    doc.close()
+    assert report.reference_lat == "-13.50000000", report.reference_lat
+    assert report.mobile_lat == "-13.60416667", report.mobile_lat
+    assert report.reference_lon == "-71.66666667", report.reference_lon
+    assert report.mobile_lon == "-71.56666667", report.mobile_lon
+    assert report.utm_zone == "18" and report.utm_hemisphere == "S"
+    print("PASS 11: real PDF extraction of two geographic coordinate columns")
+
 def main():
     test_column_order_and_preservation()
     test_synonyms_and_varied_equipment()
@@ -288,6 +352,8 @@ def main():
     test_corrector_dashboard_regressions()
     test_cpimp_dxf_and_gnss_observation_rules()
     test_height_selection_nearest_20m()
+    test_gnss_coordinate_cards_mobile_and_reference()
+    test_report_reference_geographic_extraction()
     print("\n✅ ALL TESTS PASSED SUCCESSFULLY!")
 
 

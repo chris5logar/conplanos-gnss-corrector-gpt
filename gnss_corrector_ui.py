@@ -94,6 +94,19 @@ border-bottom:1px solid rgba(111,127,135,.18);padding-bottom:.26rem;margin-botto
 .cp-tile b{font-size:.81rem;display:block;margin-top:.12rem;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .cp-subsection{font-size:.63rem;letter-spacing:.04em;font-weight:820;color:#0b827d;margin:.52rem 0 .16rem}
 .cp-footnote{font-size:.6rem;opacity:.68;line-height:1.4;margin:.44rem 0 0}
+.cp-geo-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.45rem;margin:.38rem 0 .5rem}
+.cp-geo-card{border:1px solid rgba(111,127,135,.24);border-radius:10px;min-width:0;padding:.5rem .5rem .42rem;background:var(--background-color)}
+.cp-geo-card--mobile{border:1px solid rgba(12,128,120,.44);background:linear-gradient(160deg,rgba(20,155,142,.075),transparent 68%)}
+.cp-geo-head{font-size:.6rem;font-weight:850;letter-spacing:.042em;color:#0b827d}
+.cp-geo-card--reference .cp-geo-head{color:var(--text-color);opacity:.72}
+.cp-geo-name{font-size:.72rem;font-weight:850;line-height:1.24;margin:.14rem 0 .34rem;overflow-wrap:anywhere}
+.cp-geo-group{font-size:.58rem;letter-spacing:.035em;font-weight:820;color:#0b827d;margin:.39rem 0 .13rem;border-top:1px solid rgba(111,127,135,.18);padding-top:.3rem}
+.cp-geo-pair{display:flex;align-items:baseline;justify-content:space-between;gap:.25rem;font-size:.63rem;margin:.13rem 0}
+.cp-geo-pair span{opacity:.72;flex-shrink:0}
+.cp-geo-pair strong{text-align:right;font-size:.66rem;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;min-width:0}
+.cp-geo-source{font-size:.57rem;color:var(--text-color);opacity:.65;margin:.3rem 0 0;line-height:1.25}
+.cp-geo-note{font-size:.6rem;line-height:1.35;opacity:.68;margin:.2rem 0 .4rem}
+@media(max-width:650px){.cp-geo-grid{grid-template-columns:1fr}}
 .cp-banner{font-size:.7rem;padding:.46rem .6rem;border-radius:8px;margin:.25rem 0}
 .cp-banner-red{border:1px solid #e88c8c;background:rgba(215,45,45,.09);color:var(--text-color)}
 .cp-banner-orange{border:1px solid #dca864;background:rgba(220,154,36,.08);color:var(--text-color)}
@@ -196,6 +209,63 @@ def _lat_lon(e, n, zone, hemisphere):
     return None
 
 
+
+
+def _report_coordinate_card(report, kind: str) -> str:
+    """Render point coordinates independently with the heights from the PDF.
+
+    UTM: X/East, Y/North, orthometric H.
+    Geographic WGS84: latitude, longitude, ellipsoidal h.
+    Never silently label a computed lat/lon as an observed PDF field.
+    """
+    if kind not in {"mobile", "reference"}:
+        raise ValueError("Tipo de punto inválido.")
+    is_mobile = kind == "mobile"
+    label = "PUNTO GEODÉSICO MÓVIL" if is_mobile else "ESTACIÓN DE REFERENCIA"
+    name = report.mobile_name if is_mobile else report.reference_name
+    e = report.mobile_e if is_mobile else report.reference_e
+    n = report.mobile_n if is_mobile else report.reference_n
+    h_ortho = report.mobile_h_ortho if is_mobile else report.reference_h_ortho
+    h_ellip = report.mobile_h_ellip if is_mobile else report.reference_h_ellip
+    lat_report = report.mobile_lat if is_mobile else report.reference_lat
+    lon_report = report.mobile_lon if is_mobile else report.reference_lon
+    hemi = (report.utm_hemisphere or "").upper()
+    zone = str(report.utm_zone) if report.utm_zone else None
+    if lat_report and lon_report:
+        lat, lon = lat_report, lon_report
+        source = "Latitud y longitud extraídas del PDF"
+    elif zone and hemi in ("N", "S"):
+        latlon = _lat_lon(e, n, zone, hemi)
+        if latlon is not None:
+            lat, lon = latlon.split(", ", 1)
+            source = "Latitud y longitud convertidas de UTM"
+        else:
+            lat = lon = "—"
+            source = "Latitud y longitud no disponibles"
+    else:
+        lat = lon = "—"
+        source = "Zona UTM no identificada; sin conversión"
+    utm_label = f"UTM WGS84 · Zona {zone}{hemi}" if zone and hemi in ("N", "S") else "UTM · zona no identificada"
+    def value(number):
+        return f"{number:.4f} m" if number is not None else "—"
+    html_rows = (
+        '<article class="cp-geo-card' + (" cp-geo-card--mobile" if is_mobile else " cp-geo-card--reference") + '">'
+        + '<div class="cp-geo-head">' + _esc(label) + '</div>'
+        + '<div class="cp-geo-name">' + _esc(name) + '</div>'
+        + '<div class="cp-geo-group">' + _esc(utm_label) + '</div>'
+        + _line("Este (X)", value(e))
+        + _line("Norte (Y)", value(n))
+        + _line("H ortométrica", value(h_ortho))
+        + '<div class="cp-geo-group">GEOGRÁFICAS · WGS84</div>'
+        + _line("Latitud", lat)
+        + _line("Longitud", lon)
+        + _line("h elipsoidal", value(h_ellip))
+        + '<div class="cp-geo-source">' + _esc(source) + '</div>'
+        + '</article>'
+    )
+    # CSS is scoped inside the coordinate card, not all data rows.
+    return html_rows
+
 def _read_report_uploads(pdfs):
     reports = []
     for f in (pdfs or []):
@@ -208,7 +278,7 @@ def _read_report_uploads(pdfs):
 
 def render_corrector():
     _show_styles()
-    st.markdown('<div class="cp-heading"><h2>Corrección GNSS</h2><span>CONPLANOS · RTK / ESTÁTICO · V10.6.3</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="cp-heading"><h2>Corrección GNSS</h2><span>CONPLANOS · RTK / ESTÁTICO · V10.6.4</span></div>', unsafe_allow_html=True)
 
     # 01. El resumen del CSV se coloca en su misma fila.
     source_left, source_right = st.columns([1.35, 1], gap="medium")
@@ -275,8 +345,8 @@ def render_corrector():
     mode = "PDF"
     reports = []
     with pdf_left:
-        st.markdown('<div class="cp-tag">02 · PROCESAMIENTO Y COORDENADAS CORREGIDAS</div>', unsafe_allow_html=True)
-        st.caption("Adjunta el informe Leica o introduce las coordenadas manuales.")
+        st.markdown('<div class="cp-tag">02 · PROCESAMIENTO GNSS DEL PUNTO GEODÉSICO</div>', unsafe_allow_html=True)
+        st.caption("Adjunta el informe GNSS del punto geodésico o introduce las coordenadas manuales.")
         pdfs = st.file_uploader("Informes Leica", type=["pdf"], accept_multiple_files=True,
                                 label_visibility="collapsed", key="corrector_reports_v8")
         reports = _read_report_uploads(pdfs)
@@ -360,15 +430,18 @@ def render_corrector():
             body += _line("Receptor base", rep.reference_receiver) + _line("Receptor móvil", rep.mobile_receiver)
             body += _line("Antena base", rep.reference_antenna) + _line("Antena móvil", rep.mobile_antenna)
             body += _line("Altura antena móvil", f"{rep.mobile_antenna_height_m:.4f} m" if rep.mobile_antenna_height_m is not None else "—")
-            body += _section("COORDENADAS GEOGRÁFICAS · WGS84")
-            body += _line("Referencia (lat, lon)", (reference_geo + " · UTM convertida") if reference_geo else "—")
-            body += _line("Móvil (lat, lon)", (str(rep.mobile_lat) + " / " + str(rep.mobile_lon))
-                           if rep.mobile_lat and rep.mobile_lon else ((mobile_geo + " · UTM convertida") if mobile_geo else "—"))
-            body += _section("ALTURAS REPORTADAS · BASE / MÓVIL")
-            body += _line("Base elipsoidal", f"{rep.reference_h_ellip:.4f} m" if rep.reference_h_ellip is not None else "—")
-            body += _line("Base ortométrica", f"{rep.reference_h_ortho:.4f} m" if rep.reference_h_ortho is not None else "—")
-            body += _line("Móvil elipsoidal", f"{rep.mobile_h_ellip:.4f} m" if rep.mobile_h_ellip is not None else "—")
-            body += _line("Móvil ortométrica", f"{rep.mobile_h_ortho:.4f} m" if rep.mobile_h_ortho is not None else "—")
+            body += _section("COORDENADAS CORREGIDAS · PUNTO MÓVIL Y REFERENCIA")
+            body += (
+                '<div class="cp-geo-grid">'
+                + _report_coordinate_card(rep, "mobile")
+                + _report_coordinate_card(rep, "reference")
+                + '</div>'
+            )
+            body += (
+                '<p class="cp-geo-note">UTM: Este, Norte y altura ortométrica. '
+                'Geográficas WGS84: latitud, longitud y altura elipsoidal, '
+                'según el informe. Los datos convertidos se identifican expresamente.</p>'
+            )
             body += _section("PRECISIONES Y ERRORES DEL INFORME")
             body += _tiles([("CQ 1D", f"{rep.cq1d_m:.4f} m" if rep.cq1d_m is not None else "—"),
                             ("CQ 2D", f"{rep.cq2d_m:.4f} m" if rep.cq2d_m is not None else "—"),
@@ -378,15 +451,16 @@ def render_corrector():
                             ("ERROR Z", f"{rep.error_z_m:.4f} m" if rep.error_z_m is not None else "—")])
             if name in corrections:
                 e, n, h, _, hc = corrections[name]
-                body += _section("DESTINO DE LA CORRECCIÓN · CSV")
-                body += _tiles([("ESTE (X)", f"{e:.4f}"), ("NORTE (Y)", f"{n:.4f}"), ("ALTURA", f"{h:.4f}")])
-                if hc:
-                    body += _line("Tipo de altura", hc["selected_type"])
+                body += _section("ALTURA APLICADA Y AJUSTES DEL CSV")
+                body += _line(
+                    "Altura seleccionada",
+                    f"{hc['selected_type']} · {h:.4f} m" if hc else f"Manual · {h:.4f} m",
+                )
                 if infos:
                     original = infos[0][1]
                     body += _line("ΔE / ΔN / ΔH",
                                   f"{e-original.base_original_e:+.4f} / {n-original.base_original_n:+.4f} / {h-original.base_original_h:+.4f} m")
-            body += '<p class="cp-footnote">Las coordenadas convertidas requieren zona UTM identificada en el PDF. CQ no equivale automáticamente a error X/Y/Z.</p>'
+            body += '<p class="cp-footnote">La zona UTM debe estar identificada para convertir latitud/longitud. CQ no equivale a errores X/Y/Z.</p>'
             st.markdown(_panel("RESUMEN DEL PROCESAMIENTO", body), unsafe_allow_html=True)
             if not _fixed(rep.solution_type or rep.solution_state):
                 st.error("🔴 ADVERTENCIA CRÍTICA: la solución del PDF no se ha identificado como FIJA. Verifica el procesamiento antes de certificar.")
