@@ -201,6 +201,23 @@ def test_streamlit_app_and_certificates():
     print("PASS 6: Streamlit app & PDF/Word certificate generation")
 
 
+
+def test_corrector_dashboard_regressions():
+    """Regression guard for the native CSV and PDF first-screen workflow."""
+    import ast
+    source = Path("app.py").read_text(encoding="utf-8")
+    ast.parse(source)
+    assert 'VERSION = "10.6.2"' in source
+    assert 'key="corrector_native_v8"' in source
+    assert 'key="corrector_reports_v8"' in source
+    assert 'len(set(signatures)) == 1' in source
+    assert 'len({base_coord_signature})' not in source
+    assert '↓ NATIVA ACTUALIZADA' in source and '↓ CORREGIDA' in source
+    assert 'Tiempo estático' in source and 'Distancia geométrica' in source
+    assert 'CALIDAD DEL CSV' in source and 'PRECISIONES DEL PDF' in source
+    assert 'Google Maps Embed' not in source
+    print("PASS 7: compact dashboard, dual upload, merge TypeError regression and downloads")
+
 def main():
     test_column_order_and_preservation()
     test_synonyms_and_varied_equipment()
@@ -208,6 +225,7 @@ def main():
     test_multiple_csv_merging_with_master_template()
     test_synthetic_point_clearing_and_tin()
     test_streamlit_app_and_certificates()
+    test_corrector_dashboard_regressions()
     print("\n✅ ALL TESTS PASSED SUCCESSFULLY!")
 
 
