@@ -128,7 +128,7 @@ def test_multiple_csv_merging_with_master_template():
     assert merged_info.fieldnames == master_fields, "Merged output must use Master CSV header schema"
     assert len(merged_info.rows) == 3  # Base + P1 + P2
     assert merged_info.rows[2]["Nombre"] == "2"
-    assert merged_info.rows[2]["Observación"] == "60"
+    assert merged_info.rows[2]["Observación"] == "", "No fabricar observaciones ausentes del segundo equipo"
     assert merged_info.rows[2]["Método"] == "Topográfico"
 
     print("PASS 4: Multi-CSV merging with Master CSV template")
@@ -207,16 +207,76 @@ def test_corrector_dashboard_regressions():
     import ast
     source = Path("app.py").read_text(encoding="utf-8")
     ast.parse(source)
-    assert 'VERSION = "10.6.2"' in source
-    assert 'key="corrector_native_v8"' in source
-    assert 'key="corrector_reports_v8"' in source
-    assert 'len(set(signatures)) == 1' in source
+    assert 'VERSION = "10.6.3"' in source
+    ui = Path("gnss_corrector_ui.py").read_text(encoding="utf-8")
+    assert 'key="corrector_native_v8"' in ui
+    assert 'key="corrector_reports_v8"' in ui
+    assert 'from gnss_corrector_ui import render_corrector' in source
     assert 'len({base_coord_signature})' not in source
-    assert '↓ NATIVA ACTUALIZADA' in source and '↓ CORREGIDA' in source
-    assert 'Tiempo estático' in source and 'Distancia geométrica' in source
-    assert 'CALIDAD DEL CSV' in source and 'PRECISIONES DEL PDF' in source
-    assert 'Google Maps Embed' not in source
+    ui = Path("gnss_corrector_ui.py").read_text(encoding="utf-8")
+    assert '↓ NATIVA ACTUALIZADA' in ui and '↓ CORREGIDA CSV' in ui
+    assert 'TIEMPO DE LECTURA' in ui and 'Distancia geométrica' in ui
+    assert 'CALIDAD DE PUNTOS MÓVILES' in ui and 'PRECISIONES Y ERRORES DEL INFORME' in ui
+    assert 'Google Maps Embed' not in source and 'Google Maps Embed' not in ui
     print("PASS 7: compact dashboard, dual upload, merge TypeError regression and downloads")
+
+
+def test_cpimp_dxf_and_gnss_observation_rules():
+    """CAD uses East=X North=Y, CPimp settings and excludes the GNSS base."""
+    import ezdxf
+    from cad_export import export_corrected_dxf
+    headers = ["Solución", "Elevación", "Nombre", "N/S de la base del GNSS",
+               "Norte", "Número de Observación", "Este", "Código"]
+    rows = [
+        ["BASE", "3693.0000", "B_001", "", "8494580.0000", "8", "222259.0000", "BASE"],
+        ["Fijo (Fase)", "3693.1000", "P1", "B_001", "8494581.0000", "5", "222260.0000", "L1"],
+        ["Flotante", "3693.2000", "P2", "B_002", "8494582.0000", "75", "222261.0000", "L1"],
+    ]
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    writer.writerows(rows)
+    info = read_csv(output.getvalue().encode("utf-8-sig"))
+    assert len(info.fixed_points) == 1, info.fixed_points
+    assert len(info.non_fixed_points) == 1 and info.non_fixed_points[0][1] == "Flotante"
+    assert info.different_base_points == [("P2", "B_002")]
+    native, _ = native_updated(info)
+    reread = read_csv(native)
+    assert reread.rows[0]["Número de Observación"] == "8"
+    assert reread.rows[1]["Número de Observación"] == "60"
+    assert reread.rows[2]["Número de Observación"] == "75"
+    assert reread.rows[2]["N/S de la base del GNSS"] == "B_002"
+    corrected, _, calc = apply_correction(info, 222259.1, 8494580.2, 3693.3)
+    reread_corr = read_csv(corrected)
+    assert reread_corr.rows[1]["Número de Observación"] == "60"
+    assert reread_corr.rows[2]["Número de Observación"] == "75"
+    assert reread_corr.rows[0]["Número de Observación"] == "8"
+    cad = export_corrected_dxf(reread_corr)
+    doc = ezdxf.read(io.StringIO(cad.decode("utf-8")))
+    assert {"Pun_TODOS", "pol_TODOS"}.issubset(set(doc.layers.entries.keys())) or (
+        "Pun_TODOS" in doc.layers and "pol_TODOS" in doc.layers)
+    model = doc.modelspace()
+    points = list(model.query("POINT"))
+    texts = list(model.query("TEXT"))
+    lines = list(model.query("LWPOLYLINE"))
+    assert len(points) == 2, "Base must be excluded from CAD drawing"
+    assert len(texts) == 4 and all(abs(t.dxf.height - .04) < 1e-9 for t in texts)
+    assert len(lines) == 1
+    assert abs(points[0].dxf.location.x - 222260.1) < 1e-5  # East is X
+    assert abs(points[0].dxf.location.y - 8494581.2) < 1e-5  # North is Y
+    assert lines[0].dxf.flags == 0  # open polyline, CPimp default
+    print("PASS 8: CPimp DXF, native/corrected observation minimum, alternate base and non-FIX")
+
+
+def test_height_selection_nearest_20m():
+    from core import ReportInfo, choose_height
+    pdf = ReportInfo(mobile_h_ortho=3691.7, mobile_h_ellip=3732.5)
+    selection = choose_height(3693.0, pdf, "Automática")
+    assert selection["selected_type"] == "Ortométrica"
+    assert abs(selection["selected_h"] - 3691.7) < 1e-8
+    far = choose_height(3800.0, pdf, "Automática")
+    assert any("20" in x for x in far["warnings"])
+    print("PASS 9: nearest ortho/ellip height selection and 20m warning")
 
 def main():
     test_column_order_and_preservation()
@@ -226,6 +286,8 @@ def main():
     test_synthetic_point_clearing_and_tin()
     test_streamlit_app_and_certificates()
     test_corrector_dashboard_regressions()
+    test_cpimp_dxf_and_gnss_observation_rules()
+    test_height_selection_nearest_20m()
     print("\n✅ ALL TESTS PASSED SUCCESSFULLY!")
 
 

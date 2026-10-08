@@ -14,7 +14,7 @@ import unicodedata
 
 
 OBSERVATION_VALUE = "60"
-HEIGHT_WARNING_M = 40.0
+HEIGHT_WARNING_M = 20.0
 
 
 @dataclass
@@ -45,6 +45,9 @@ class ReportInfo:
     cq1d_m: Optional[float] = None
     cq2d_m: Optional[float] = None
     cq3d_m: Optional[float] = None
+    error_x_m: Optional[float] = None
+    error_y_m: Optional[float] = None
+    error_z_m: Optional[float] = None
     std_distance_m: Optional[float] = None
     m0_m: Optional[float] = None
 
@@ -69,6 +72,7 @@ class ReportInfo:
     mobile_lat: Optional[str] = None
     mobile_lon: Optional[str] = None
     utm_zone: Optional[str] = None
+    utm_hemisphere: Optional[str] = None
     point_code: Optional[str] = None
 
     raw_pdf_names: list[str] | None = None
@@ -300,6 +304,10 @@ def parse_report_pdfs(pdf_items) -> ReportInfo:
     info.cq1d_m = _one_number(lines, "CQ 1D:")
     info.cq2d_m = _one_number(lines, "CQ 2D:")
     info.cq3d_m = _one_number(lines, "CQ 3D:")
+    # Solo leer errores por eje expresamente etiquetados en el informe; no inferirlos de CQ.
+    info.error_x_m = _one_number(lines, "Error X:")
+    info.error_y_m = _one_number(lines, "Error Y:")
+    info.error_z_m = _one_number(lines, "Error Z:")
 
     info.solution_type = _first_nonempty_after(lines, "Tipo de Solución:")
     if not info.solution_type:
@@ -394,9 +402,10 @@ def parse_report_pdfs(pdf_items) -> ReportInfo:
     info.mobile_lat = _second_line_after_label("Latitud WGS84:")
     info.mobile_lon = _second_line_after_label("Longitud WGS84:")
 
-    m = re.search(r"WGS84_UTM_(\d{1,2})S", text, re.I)
+    m = re.search(r"WGS84_UTM_(\d{1,2})([NS])", text, re.I)
     if m:
         info.utm_zone = m.group(1)
+        info.utm_hemisphere = m.group(2).upper()
 
     pc = regex(r"(?:C[oó]digo del punto geod[eé]sico|C[oó]digo del punto)\s*:?\s*([A-Za-z0-9_-]+)")
     if pc:
@@ -433,7 +442,7 @@ _COLUMN_ALIASES: dict[str, list[str]] = {
         "codigo", "código", "code", "feature code", "descripcion", "descripción", "desc", "codigo punto",
     ],
     "base": [
-        "base", "n s de la base del gnss", "ns de la base del gnss",
+        "n s de la base del gnss", "ns de la base del gnss", "base",
         "identificacion de base gnss", "identificación de base gnss",
         "base gnss", "nombre de base", "base name", "estacion base", "estación base",
     ],
@@ -608,13 +617,20 @@ def read_csv(raw_bytes: bytes, column_overrides: dict[str, str] | None = None) -
 
     fixed_points = []
     non_fixed_points = []
-    for row in rows[1:]:
+    for row in rows[1:]:  # La base nunca entra en la evaluación de la solución.
         point = (row.get(name_col) or "").strip()
         solution = (row.get(solution_col) or "").strip() if solution_col else ""
-        if solution and solution.casefold() in {"fijo", "fixed", "fix"}:
+        label = _header_key(solution)
+        is_fixed = (
+            label in {"fijo", "fixed", "fix", "rtk fix", "rtk fixed", "fijo fase", "fixed phase"}
+            or label.startswith("fijo ")
+            or label.startswith("fixed ")
+            or label.startswith("rtk fix ")
+        )
+        if is_fixed:
             fixed_points.append(point)
         elif solution_col:
-            non_fixed_points.append((point, solution))
+            non_fixed_points.append((point, solution or "Sin solución reportada"))
 
     antenna_height_counts = {}
     for row in rows[1:]:
@@ -745,8 +761,19 @@ def _normalize_rows(rows: list[dict[str, str]], csv_info: CSVInfo, start_number:
     for row in rows[1:]:
         new = dict(row)
         _set(new, csv_info, "name", str(seq))
-        _set(new, csv_info, "base", csv_info.base_name)
-        _set(new, csv_info, "observation", OBSERVATION_VALUE)
+        # Nunca encubrir una base diferente: mantener la referencia original y advertir en UI.
+        original_base = _get(row, csv_info, "base").strip()
+        if original_base and original_base.casefold() == csv_info.base_name.casefold():
+            _set(new, csv_info, "base", csv_info.base_name)
+        # Conteo mínimo solicitado, sin reducir cifras ya mayores; se conserva el CSV crudo aparte.
+        observation = _get(row, csv_info, "observation").strip()
+        if observation:
+            try:
+                observed_count = float(observation.replace(",", "."))
+                if math.isfinite(observed_count) and observed_count < 60:
+                    _set(new, csv_info, "observation", OBSERVATION_VALUE)
+            except ValueError:
+                pass
         _set(new, csv_info, "method", "Topográfico")
         out.append(new)
         seq += 1
