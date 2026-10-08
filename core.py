@@ -45,6 +45,9 @@ class ReportInfo:
     cq1d_m: Optional[float] = None
     cq2d_m: Optional[float] = None
     cq3d_m: Optional[float] = None
+    error_x_m: Optional[float] = None
+    error_y_m: Optional[float] = None
+    error_z_m: Optional[float] = None
     std_distance_m: Optional[float] = None
     m0_m: Optional[float] = None
 
@@ -69,6 +72,7 @@ class ReportInfo:
     mobile_lat: Optional[str] = None
     mobile_lon: Optional[str] = None
     utm_zone: Optional[str] = None
+    utm_hemisphere: Optional[str] = None
     point_code: Optional[str] = None
 
     raw_pdf_names: list[str] | None = None
@@ -300,6 +304,10 @@ def parse_report_pdfs(pdf_items) -> ReportInfo:
     info.cq1d_m = _one_number(lines, "CQ 1D:")
     info.cq2d_m = _one_number(lines, "CQ 2D:")
     info.cq3d_m = _one_number(lines, "CQ 3D:")
+    # Solo leer errores por eje expresamente etiquetados en el informe; no inferirlos de CQ.
+    info.error_x_m = _one_number(lines, "Error X:")
+    info.error_y_m = _one_number(lines, "Error Y:")
+    info.error_z_m = _one_number(lines, "Error Z:")
 
     info.solution_type = _first_nonempty_after(lines, "Tipo de Solución:")
     if not info.solution_type:
@@ -394,9 +402,10 @@ def parse_report_pdfs(pdf_items) -> ReportInfo:
     info.mobile_lat = _second_line_after_label("Latitud WGS84:")
     info.mobile_lon = _second_line_after_label("Longitud WGS84:")
 
-    m = re.search(r"WGS84_UTM_(\d{1,2})S", text, re.I)
+    m = re.search(r"WGS84_UTM_(\d{1,2})([NS])", text, re.I)
     if m:
         info.utm_zone = m.group(1)
+        info.utm_hemisphere = m.group(2).upper()
 
     pc = regex(r"(?:C[oó]digo del punto geod[eé]sico|C[oó]digo del punto)\s*:?\s*([A-Za-z0-9_-]+)")
     if pc:
