@@ -207,7 +207,7 @@ def test_corrector_dashboard_regressions():
     import ast
     source = Path("app.py").read_text(encoding="utf-8")
     ast.parse(source)
-    assert 'VERSION = "10.6.4"' in source
+    assert 'VERSION = "10.6.5"' in source
     ui = Path("gnss_corrector_ui.py").read_text(encoding="utf-8")
     assert 'key="corrector_native_v8"' in ui
     assert 'key="corrector_reports_v8"' in ui
@@ -294,29 +294,32 @@ def test_gnss_coordinate_cards_mobile_and_reference():
     )
     mobile_html = _report_coordinate_card(rep, "mobile")
     ref_html = _report_coordinate_card(rep, "reference")
-    assert "PUNTO GEODÉSICO MÓVIL" in mobile_html
-    assert "ESTACIÓN DE REFERENCIA" in ref_html
+    assert "PUNTO GEODÉSICO ELABORADO" in mobile_html
+    assert "ERP · ESTACIÓN DE REFERENCIA" in ref_html
     assert "Ruth Ccatca" in mobile_html and "CS01" in ref_html
     assert "UTM WGS84 · Zona 18S" in mobile_html
     for expected in ("222259.4808 m", "8494579.9537 m",
                      "3691.6519 m", "3738.9468 m", "13 36 15 S", "71 34 00 O"):
         assert expected in mobile_html, expected
-    for expected in ("177222.4000 m", "8500000.4000 m",
-                     "3363.7346 m", "3410.0095 m", "13 30 00 S", "71 40 00 O"):
+    for expected in ("3410.0095 m", "13 30 00 S", "71 40 00 O"):
         assert expected in ref_html, expected
-    assert "Latitud y longitud extraídas del PDF" in mobile_html
-    assert "Latitud y longitud extraídas del PDF" in ref_html
-    assert mobile_html.index("H ortométrica") < mobile_html.index("GEOGRÁFICAS · WGS84")
-    assert mobile_html.index("h elipsoidal") > mobile_html.index("GEOGRÁFICAS · WGS84")
+    assert "177222.4000 m" not in ref_html  # hide non-essential ERP UTM values
+    assert "3363.7346 m" not in ref_html  # do not group ERP altitudes
+    assert "Geográficas extraídas del informe Leica" in mobile_html
+    assert "Geográficas extraídas del informe Leica" in ref_html
+    assert mobile_html.index("Altura ortométrica") < mobile_html.index("COORDENADAS GEOGRÁFICAS")
+    assert mobile_html.index("Altura elipsoidal") > mobile_html.index("COORDENADAS GEOGRÁFICAS")
+    assert "Este (E)" in mobile_html and "Norte (N)" in mobile_html
+    assert "Este (E)" not in ref_html and "Norte (N)" not in ref_html
 
     # Explicit conversion only if both zone and hemisphere are available.
     rep.reference_lat = rep.reference_lon = None
     converted = _report_coordinate_card(rep, "reference")
-    assert "convertidas de UTM" in converted
+    assert "calculadas desde UTM" in converted
     rep.utm_hemisphere = None
     missing = _report_coordinate_card(rep, "reference")
-    assert "sin conversión" in missing
-    assert "convertidas de UTM" not in missing
+    assert "zona UTM sin identificar" in missing
+    assert "calculadas desde UTM" not in missing
     print("PASS 10: paired coordinate cards, correct heights, CRS and conversion provenance")
 
 
@@ -342,6 +345,27 @@ def test_report_reference_geographic_extraction():
     assert report.utm_zone == "18" and report.utm_hemisphere == "S"
     print("PASS 11: real PDF extraction of two geographic coordinate columns")
 
+
+def test_generator_professional_ui_without_changing_data_math():
+    """Generator shares layout vocabulary with Corrector and preserves I/O API."""
+    import ast
+    app = Path("app.py").read_text(encoding="utf-8")
+    ui = Path("gnss_generator_ui.py").read_text(encoding="utf-8")
+    ast.parse(ui)
+    assert "from gnss_generator_ui import render_generator" in app
+    assert 'key="generator_native_v8"' in ui
+    assert 'key="generator_plan_v8"' in ui
+    assert 'key="gen_tol_v8"' in ui
+    assert 'key="gen_neighbors_v8"' in ui
+    assert "RESUMEN DEL CSV MATRIZ" in ui
+    assert "RESUMEN DE COORDENADAS DEL PLANO" in ui
+    assert "CALIDAD DE LA DATA MATRIZ" in ui
+    assert "generate_derived_data(" in ui and "merge_csv_payloads(" in ui
+    assert "DATA GENERADA UNIDA" in ui and "NATIVA ACTUALIZADA" in ui
+    assert "TODO EN ZIP" in ui and "generator_result_v8" in ui
+    assert "puntos sin solución FIX" not in ui.lower()  # no automatic FIX fabrication
+    print("PASS 12: generator professional UI, master matrix and existing exports")
+
 def main():
     test_column_order_and_preservation()
     test_synonyms_and_varied_equipment()
@@ -354,6 +378,7 @@ def main():
     test_height_selection_nearest_20m()
     test_gnss_coordinate_cards_mobile_and_reference()
     test_report_reference_geographic_extraction()
+    test_generator_professional_ui_without_changing_data_math()
     print("\n✅ ALL TESTS PASSED SUCCESSFULLY!")
 
 

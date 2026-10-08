@@ -105,6 +105,18 @@ border-bottom:1px solid rgba(111,127,135,.18);padding-bottom:.26rem;margin-botto
 .cp-geo-pair span{opacity:.72;flex-shrink:0}
 .cp-geo-pair strong{text-align:right;font-size:.66rem;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;min-width:0}
 .cp-geo-source{font-size:.57rem;color:var(--text-color);opacity:.65;margin:.3rem 0 0;line-height:1.25}
+.cp-geo-grid{grid-template-columns:minmax(0,1.13fr) minmax(0,.87fr);align-items:start}
+.cp-geo-card--mobile{border:1px solid rgba(12,128,120,.55);background:linear-gradient(165deg,rgba(20,155,142,.085),transparent 78%);box-shadow:0 2px 12px rgba(15,86,77,.06)}
+.cp-geo-card--mobile .cp-geo-head{color:#08766f}
+.cp-geo-card--reference{background:var(--secondary-background-color)}
+.cp-coordinate-stack{display:flex;flex-direction:column;gap:.17rem;padding:.12rem 0 .2rem}
+.cp-coordinate-item{display:flex;justify-content:space-between;align-items:baseline;gap:.3rem;padding:.22rem .25rem;border-bottom:1px solid rgba(111,127,135,.12);font-variant-numeric:tabular-nums}
+.cp-coordinate-item span{font-size:.61rem;opacity:.73}
+.cp-coordinate-item strong{font-size:.75rem;font-weight:850;text-align:right;overflow-wrap:anywhere;line-height:1.34}
+.cp-coordinate-item--emphasis{background:rgba(15,133,122,.045);border-radius:5px}
+.cp-geo-card--mobile .cp-coordinate-item--emphasis strong{font-size:.81rem}
+@media(max-width:660px){.cp-geo-grid{grid-template-columns:1fr}}
+
 .cp-geo-note{font-size:.6rem;line-height:1.35;opacity:.68;margin:.2rem 0 .4rem}
 @media(max-width:650px){.cp-geo-grid{grid-template-columns:1fr}}
 .cp-banner{font-size:.7rem;padding:.46rem .6rem;border-radius:8px;margin:.25rem 0}
@@ -212,16 +224,14 @@ def _lat_lon(e, n, zone, hemisphere):
 
 
 def _report_coordinate_card(report, kind: str) -> str:
-    """Render point coordinates independently with the heights from the PDF.
+    """Professional geodetic summary: mobile UTM + geographic, ERP geographic.
 
-    UTM: X/East, Y/North, orthometric H.
-    Geographic WGS84: latitude, longitude, ellipsoidal h.
-    Never silently label a computed lat/lon as an observed PDF field.
+    UTM coordinates (Este/Norte) are projected coordinates, not ECEF Cartesian X/Y/Z.
+    Keep orthometric H with UTM and ellipsoidal h with geographic WGS84 only.
     """
     if kind not in {"mobile", "reference"}:
         raise ValueError("Tipo de punto inválido.")
     is_mobile = kind == "mobile"
-    label = "PUNTO GEODÉSICO MÓVIL" if is_mobile else "ESTACIÓN DE REFERENCIA"
     name = report.mobile_name if is_mobile else report.reference_name
     e = report.mobile_e if is_mobile else report.reference_e
     n = report.mobile_n if is_mobile else report.reference_n
@@ -233,38 +243,57 @@ def _report_coordinate_card(report, kind: str) -> str:
     zone = str(report.utm_zone) if report.utm_zone else None
     if lat_report and lon_report:
         lat, lon = lat_report, lon_report
-        source = "Latitud y longitud extraídas del PDF"
+        source = "Geográficas extraídas del informe Leica"
     elif zone and hemi in ("N", "S"):
         latlon = _lat_lon(e, n, zone, hemi)
         if latlon is not None:
             lat, lon = latlon.split(", ", 1)
-            source = "Latitud y longitud convertidas de UTM"
+            source = "Geográficas calculadas desde UTM, no extraídas del PDF"
         else:
             lat = lon = "—"
-            source = "Latitud y longitud no disponibles"
+            source = "Coordenadas geográficas no disponibles"
     else:
         lat = lon = "—"
-        source = "Zona UTM no identificada; sin conversión"
-    utm_label = f"UTM WGS84 · Zona {zone}{hemi}" if zone and hemi in ("N", "S") else "UTM · zona no identificada"
-    def value(number):
-        return f"{number:.4f} m" if number is not None else "—"
-    html_rows = (
-        '<article class="cp-geo-card' + (" cp-geo-card--mobile" if is_mobile else " cp-geo-card--reference") + '">'
-        + '<div class="cp-geo-head">' + _esc(label) + '</div>'
-        + '<div class="cp-geo-name">' + _esc(name) + '</div>'
-        + '<div class="cp-geo-group">' + _esc(utm_label) + '</div>'
-        + _line("Este (X)", value(e))
-        + _line("Norte (Y)", value(n))
-        + _line("H ortométrica", value(h_ortho))
-        + '<div class="cp-geo-group">GEOGRÁFICAS · WGS84</div>'
-        + _line("Latitud", lat)
-        + _line("Longitud", lon)
-        + _line("h elipsoidal", value(h_ellip))
-        + '<div class="cp-geo-source">' + _esc(source) + '</div>'
-        + '</article>'
+        source = "Geográficas no disponibles; zona UTM sin identificar"
+
+    def height(value):
+        return f"{value:.4f} m" if value is not None else "—"
+
+    def item(label, value, primary=False):
+        return ('<div class="cp-coordinate-item'
+                + (' cp-coordinate-item--emphasis' if primary else '')
+                + '"><span>' + _esc(label) + '</span><strong>'
+                + _esc(value) + '</strong></div>')
+
+    label = "PUNTO GEODÉSICO ELABORADO" if is_mobile else "ERP · ESTACIÓN DE REFERENCIA"
+    css_class = "cp-geo-card cp-geo-card--mobile" if is_mobile else "cp-geo-card cp-geo-card--reference"
+    content = (
+        '<article class="' + css_class + '">'
+        '<div class="cp-geo-head">' + _esc(label) + '</div>'
+        '<div class="cp-geo-name">' + _esc(name) + '</div>'
     )
-    # CSS is scoped inside the coordinate card, not all data rows.
-    return html_rows
+    if is_mobile:
+        utm_title = f"UTM WGS84 · Zona {zone}{hemi}" if zone and hemi in ("N", "S") else "UTM · Zona no identificada"
+        content += (
+            '<div class="cp-geo-group">' + _esc(utm_title) + '</div>'
+            '<div class="cp-coordinate-stack">'
+            + item("Este (E)", height(e), primary=True)
+            + item("Norte (N)", height(n), primary=True)
+            + item("Altura ortométrica (H)", height(h_ortho), primary=True)
+            + '</div>'
+        )
+    content += (
+        '<div class="cp-geo-group">COORDENADAS GEOGRÁFICAS · WGS84</div>'
+        '<div class="cp-coordinate-stack">'
+        + item("Latitud", lat, primary=is_mobile)
+        + item("Longitud", lon, primary=is_mobile)
+        + item("Altura elipsoidal (h)", height(h_ellip), primary=is_mobile)
+        + '</div>'
+        '<div class="cp-geo-source">' + _esc(source) + '</div>'
+        '</article>'
+    )
+    return content
+
 
 def _read_report_uploads(pdfs):
     reports = []
@@ -278,7 +307,7 @@ def _read_report_uploads(pdfs):
 
 def render_corrector():
     _show_styles()
-    st.markdown('<div class="cp-heading"><h2>Corrección GNSS</h2><span>CONPLANOS · RTK / ESTÁTICO · V10.6.4</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="cp-heading"><h2>Corrección GNSS</h2><span>CONPLANOS · RTK / ESTÁTICO · V10.6.5</span></div>', unsafe_allow_html=True)
 
     # 01. El resumen del CSV se coloca en su misma fila.
     source_left, source_right = st.columns([1.35, 1], gap="medium")
@@ -430,7 +459,7 @@ def render_corrector():
             body += _line("Receptor base", rep.reference_receiver) + _line("Receptor móvil", rep.mobile_receiver)
             body += _line("Antena base", rep.reference_antenna) + _line("Antena móvil", rep.mobile_antenna)
             body += _line("Altura antena móvil", f"{rep.mobile_antenna_height_m:.4f} m" if rep.mobile_antenna_height_m is not None else "—")
-            body += _section("COORDENADAS CORREGIDAS · PUNTO MÓVIL Y REFERENCIA")
+            body += _section("COORDENADAS GEODÉSICAS · PUNTO ELABORADO Y ERP")
             body += (
                 '<div class="cp-geo-grid">'
                 + _report_coordinate_card(rep, "mobile")
