@@ -68,7 +68,7 @@ from certificate import (
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 LOGO_PATH = TEMPLATES_DIR / "logo_conplanos.png"
-VERSION = "10.6.1"
+VERSION = "10.6.2"
 
 st.set_page_config(
     page_title="CONPLANOS GNSS",
@@ -95,6 +95,24 @@ st.markdown(
       .brand-footer {margin-top:1.2rem;padding:.65rem .4rem;border-top:1px solid rgba(127,127,127,.22);text-align:center;color:rgba(127,127,127,.92);font-size:.72rem;}
       .brand-badge {border-radius:11px;overflow:hidden;border:1px solid rgba(127,127,127,.22);margin:.2rem 0 .7rem 0;background:#111;}
       .download-head {font-size:.88rem;font-weight:750;margin-top:.8rem;margin-bottom:.35rem;}
+
+      /* CONPLANOS GNSS 10.6.2 · panel compacto */
+      .gnss-head h2{font-size:1.35rem;margin:0;font-weight:800;line-height:1.2;color:var(--text-color)}
+      .gnss-head p{font-size:.72rem;opacity:.65;margin:.15rem 0 .55rem}
+      .gnss-label{font-size:.71rem;font-weight:800;color:#0f766e;margin:.25rem 0 .3rem}
+      .gnss-panel{border:1px solid rgba(128,128,128,.25);border-radius:12px;padding:.65rem .75rem;background:var(--background-color)}
+      .gnss-h{font-size:.65rem;letter-spacing:.06em;color:#0d7c77;font-weight:850;border-bottom:1px solid rgba(128,128,128,.17);padding:.48rem 0 .2rem;margin-bottom:.3rem}
+      .gnss-h:first-child{padding-top:0}
+      .gnss-row{display:flex;justify-content:space-between;align-items:baseline;gap:.4rem;font-size:.69rem;margin:.2rem 0}
+      .gnss-row span{opacity:.69;white-space:nowrap}.gnss-row strong{font-size:.72rem;text-align:right;overflow-wrap:anywhere}
+      .gnss-triple{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.28rem;margin:.3rem 0}
+      .gnss-stat{padding:.34rem .3rem;border-radius:7px;background:var(--secondary-background-color);overflow:hidden}
+      .gnss-stat small{display:block;font-size:.54rem;opacity:.7;white-space:nowrap}
+      .gnss-stat strong{display:block;font-size:.83rem;line-height:1.2;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;margin-top:.14rem}
+      .gnss-foot{font-size:.60rem;opacity:.65;line-height:1.35;margin-top:.45rem}
+      .gnss-file{font-size:.78rem;font-weight:800;overflow-wrap:anywhere;margin:.25rem 0}
+      [data-testid="stFileUploader"] section{min-height:46px!important;padding:.3rem .5rem!important}
+      @media(max-width:900px){.gnss-row{flex-wrap:wrap}}
       .eph-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.65rem;margin-top:.55rem;}
       .eph-card {border:1px solid rgba(127,127,127,.22);border-radius:12px;background:var(--background-color);padding:.55rem .62rem;box-shadow:0 1px 2px rgba(15,23,42,.05);color:var(--text-color);}
       .eph-card-head {display:flex;align-items:center;justify-content:space-between;gap:.45rem;padding-bottom:.35rem;border-bottom:1px solid rgba(127,127,127,.16);margin-bottom:.12rem;}
@@ -148,9 +166,8 @@ def code_summary(csv_info):
 def show_help(tool):
     if tool == "Corrector GNSS":
         st.info(
-            "Corrige uno o varios CSV nativos usando el primer archivo como plantilla maestra. "
-            "Respeta exactos nombres de columnas, orden, codificación, delimitador y campos adicionales. "
-            "Aplica la traslación de coordenadas desde el punto móvil Leica o ingreso manual."
+            "CSV y PDF desde el inicio. Revisa el resumen técnico, corrige y descarga archivos "
+            "con las mismas columnas del nativo."
         )
     elif tool == "Generador de data":
         st.warning(
@@ -317,8 +334,8 @@ with st.sidebar:
     )
     st.divider()
 
-    st.markdown("### Ayuda rápida")
-    with st.expander("¿Qué hace esta herramienta?", expanded=True):
+    st.markdown("### Ayuda")
+    with st.expander("¿Qué hace esta herramienta?", expanded=tool != "Corrector GNSS"):
         show_help(tool)
 
     with st.expander("Versiones", expanded=False):
@@ -354,226 +371,236 @@ with st.sidebar:
     st.caption(f"CONPLANOS GNSS · versión {VERSION}")
     st.caption("🎨 Tema claro/oscuro: ⋮ → Settings → Theme")
 
-st.markdown('<div class="app-title">🛰️ CONPLANOS - Herramientas GNSS</div>', unsafe_allow_html=True)
-integration_status()
+if tool != "Corrector GNSS":
+    st.markdown('<div class="app-title">🛰️ CONPLANOS - Herramientas GNSS</div>', unsafe_allow_html=True)
+    integration_status()
 
 # ========================================================
 # Corrector GNSS
 # ========================================================
 if tool == "Corrector GNSS":
-    left, right = st.columns([2.25, 1.0], gap="large")
-    with left:
-        st.markdown('<div class="step">PASO 1</div>', unsafe_allow_html=True)
-        st.subheader("Sube una o varias datas nativas del levantamiento")
-        native_uploads = st.file_uploader(
-            "CSV nativos", type=["csv"], accept_multiple_files=True,
-            label_visibility="collapsed", key="corrector_native_v8",
-            help="El primer CSV actuará como plantilla maestra, conservando su estructura, delimitador y orden de columnas exactos."
-        )
+    st.markdown('<div class="gnss-head"><h2>Corrección GNSS · RTK / estático</h2><p>Conserva tu CSV nativo. Procesa el informe Leica o introduce las coordenadas manualmente.</p></div>', unsafe_allow_html=True)
 
-    if not native_uploads:
-        st.info("Sube uno o varios CSV nativos para comenzar.")
-    else:
-        infos = []
-        errors = []
-        for idx, f in enumerate(native_uploads):
-            raw = f.getvalue()
-            try:
-                # Try reading with auto-detected columns
-                overrides = st.session_state.get(f"corrector_col_override_{idx}")
-                csv_i = read_csv(raw, column_overrides=overrides)
-                infos.append((f.name, csv_i))
-            except ValueError as exc:
-                if "columnas críticas" in str(exc).lower():
-                    overrides = prompt_manual_column_mapping(raw, f.name, f"corr_map_{idx}")
-                    if overrides:
-                        st.session_state[f"corrector_col_override_{idx}"] = overrides
-                        try:
-                            csv_i = read_csv(raw, column_overrides=overrides)
-                            infos.append((f.name, csv_i))
-                        except Exception as ex2:
-                            errors.append(f"{f.name}: {ex2}")
-                else:
-                    errors.append(f"{f.name}: {exc}")
-            except Exception as exc:
+    up1, up2 = st.columns([1.15, 1], gap="small")
+    with up1:
+        st.markdown('<div class="gnss-label">01 · CSV NATIVO · PRIMER ARCHIVO = PLANTILLA</div>', unsafe_allow_html=True)
+        native_uploads = st.file_uploader("Nativos", type=["csv"], accept_multiple_files=True, label_visibility="collapsed", key="corrector_native_v8")
+    with up2:
+        st.markdown('<div class="gnss-label">02 · INFORME DE PROCESAMIENTO PDF (OPCIONAL)</div>', unsafe_allow_html=True)
+        pdfs = st.file_uploader("Informes", type=["pdf"], accept_multiple_files=True, label_visibility="collapsed", key="corrector_reports_v8")
+
+    reports = []
+    for f in (pdfs or []):
+        try:
+            reports.append((f.name, parse_report_pdfs([(f.name, f.getvalue())])))
+        except Exception as exc:
+            st.warning(f"Informe {f.name}: {exc}")
+
+    infos, errors = [], []
+    for idx, f in enumerate(native_uploads or []):
+        data = f.getvalue()
+        try:
+            overrides = st.session_state.get(f"corrector_col_override_{idx}")
+            infos.append((f.name, read_csv(data, column_overrides=overrides)))
+        except ValueError as exc:
+            if "columnas críticas" in str(exc).casefold():
+                overrides = prompt_manual_column_mapping(data, f.name, f"corr_map_{idx}")
+                if overrides:
+                    st.session_state[f"corrector_col_override_{idx}"] = overrides
+                    try:
+                        infos.append((f.name, read_csv(data, column_overrides=overrides)))
+                    except Exception as inner:
+                        errors.append(f"{f.name}: {inner}")
+            else:
                 errors.append(f"{f.name}: {exc}")
+        except Exception as exc:
+            errors.append(f"{f.name}: {exc}")
 
+    left, right = st.columns([1.57, 1], gap="medium")
+    corrections, selected_reports = {}, {}
+    same_base = len({info.base_name.casefold() for _, info in infos}) == 1 if infos else False
+
+    with left:
         for e in errors:
-            status(f"🔴 {e}", "bad")
+            st.error(e)
         if not infos:
-            st.stop()
-
-        with right:
-            master_name = infos[0][0]
-            card(
-                "👑 Plantilla Maestra (Primer CSV)",
-                f"<b>{master_name}</b><br>"
-                f"Columnas: {len(infos[0][1].fieldnames)} · Filas: {len(infos[0][1].rows)}<br>"
-                f"Base: <b>{infos[0][1].base_name}</b>"
-            )
-            base_names = [info.base_name for _, info in infos]
-            same_base = len({x.casefold() for x in base_names}) == 1
-            if same_base:
-                status(f"🟢 Base común: {base_names[0]}", "ok")
-            else:
-                status("🔴 Hay bases diferentes. Se permite procesar por separado, pero no unir en un solo CSV.", "bad")
-
-        with st.expander("Ver resumen de cada data nativa", expanded=True):
-            for name, info in infos:
-                st.markdown(f"**{name}**")
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Registros", len(info.rows))
-                c2.metric("Base", info.base_name)
-                c3.metric("Fijo", len(info.fixed_points))
-                c4.metric("No Fijo", len(info.non_fixed_points))
-                st.markdown(
-                    f'<div class="card" style="border:2px solid #0f766e;background:#f0fdfa;">'
-                    f'<div class="card-title">📍 COORDENADAS DE LA BASE DE LA DATA NATIVA</div>'
-                    f'<div class="small"><b>E:</b> {info.base_original_e:.4f} m &nbsp; <b>N:</b> {info.base_original_n:.4f} m &nbsp; <b>H:</b> {info.base_original_h:.4f} m</div></div>',
-                    unsafe_allow_html=True,
-                )
-                if info.different_base_points:
-                    status(f"🟡 {len(info.different_base_points)} punto(s) con Base distinta.", "warn")
-
-        st.markdown('<div class="step">PASO 2</div>', unsafe_allow_html=True)
-        st.subheader("Origen de las coordenadas corregidas")
-        mode = st.radio("", ["📄 Informe de procesamiento", "✍️ Coordenadas manuales"], horizontal=True, label_visibility="collapsed", key="corrector_mode_v8")
-
-        corrections = {}
-        if mode == "📄 Informe de procesamiento":
-            pdfs = st.file_uploader(
-                "Informes Leica / procesamiento", type=["pdf"], accept_multiple_files=True,
-                label_visibility="collapsed", key="corrector_reports_v8",
-                help="Con varios CSV puedes asignar un informe a cada data."
-            )
-            reports = []
-            if pdfs:
-                try:
-                    reports = [(f.name, parse_report_pdfs([(f.name, f.getvalue())])) for f in pdfs]
-                except Exception as exc:
-                    status(f"🔴 Error leyendo informe: {exc}", "bad")
-            if not reports:
-                st.info("Sube los informes de procesamiento. Con un solo informe se podrá usar para todas las datas.")
-            else:
-                st.markdown("**Asignación de informe → data nativa**")
-                for idx, (name, info) in enumerate(infos):
-                    labels = [f"— Seleccionar —"] + [
-                        f"{rname} · Móvil: {rep.mobile_name or '—'} · Base: {rep.reference_name or '—'}" for rname, rep in reports
-                    ]
-                    default = 1 if len(reports) == 1 else 0
-                    sel = st.selectbox(f"{name}", labels, index=default, key=f"report_for_{idx}_v8")
-                    if sel == labels[0]:
-                        continue
-                    rep = reports[labels.index(sel) - 1][1]
-                    if rep.mobile_e is None or rep.mobile_n is None:
-                        status(f"🔴 {name}: el informe no contiene coordenadas del punto móvil.", "bad")
-                        continue
-                    if rep.solution_type and "fijo" not in rep.solution_type.casefold():
-                        status(f"🟡 {name}: solución reportada = {rep.solution_type}", "warn")
-                    height_mode = st.selectbox(
-                        f"Altura para {name}", ["Automática", "Ortométrica", "Elipsoidal WGS84"],
-                        index=0, key=f"height_mode_{idx}_v8"
-                    )
-                    try:
-                        hc = choose_height(info.base_original_h, rep, height_mode)
-                    except Exception as exc:
-                        status(f"🔴 {name}: {exc}", "bad")
-                        continue
-                    corrections[name] = (rep.mobile_e, rep.mobile_n, hc["selected_h"], rep, hc)
-                    card(
-                        f"📍 {name} · Punto móvil procesado",
-                        f"<b>E:</b> {rep.mobile_e:.4f} m · <b>N:</b> {rep.mobile_n:.4f} m · <b>H:</b> {hc['selected_h']:.4f} m<br>"
-                        f"Solución: {rep.solution_type or rep.solution_state or '—'} · Antena móvil: {rep.mobile_antenna or '—'}"
-                    )
+            st.info("Carga un CSV para empezar. Puedes adjuntar el PDF al mismo tiempo.")
         else:
-            if len(infos) == 1:
-                st.caption("Ingresa la corrección manual para esta data.")
-                m1, m2, m3 = st.columns(3)
-                base0 = infos[0][1]
-                man_e = m1.number_input("Este E", value=float(base0.base_original_e), format="%.4f", key="man_e_v8")
-                man_n = m2.number_input("Norte N", value=float(base0.base_original_n), format="%.4f", key="man_n_v8")
-                man_h = m3.number_input("Altura H", value=float(base0.base_original_h), format="%.4f", key="man_h_v8")
-                corrections[infos[0][0]] = (man_e, man_n, man_h, None, None)
-            else:
-                st.caption("Con varias datas, la corrección manual se define por archivo para evitar aplicar accidentalmente una coordenada a otra base.")
+            if not same_base:
+                st.warning("Hay bases distintas: no se unirán archivos de diferentes bases.")
+            st.markdown('<div class="gnss-label">03 · ORIGEN DE COORDENADAS CORREGIDAS</div>', unsafe_allow_html=True)
+            mode = st.radio("Modo", ["📄 Informe de procesamiento", "✍️ Coordenadas manuales"], horizontal=True, label_visibility="collapsed", key="corrector_mode_v8")
+            if mode == "📄 Informe de procesamiento":
+                if not reports:
+                    st.caption("Carga un PDF arriba o elige «Coordenadas manuales».")
                 for idx, (name, info) in enumerate(infos):
-                    with st.expander(f"✍️ Corrección manual · {name}", expanded=False):
-                        m1, m2, m3 = st.columns(3)
-                        man_e = m1.number_input("Este E", value=float(info.base_original_e), format="%.4f", key=f"man_e_{idx}_v8")
-                        man_n = m2.number_input("Norte N", value=float(info.base_original_n), format="%.4f", key=f"man_n_{idx}_v8")
-                        man_h = m3.number_input("Altura H", value=float(info.base_original_h), format="%.4f", key=f"man_h_{idx}_v8")
-                        corrections[name] = (man_e, man_n, man_h, None, None)
-
-        st.markdown('<div class="step">PASO 3</div>', unsafe_allow_html=True)
-        if st.button("🚀 GENERAR Y PREPARAR DESCARGAS", type="primary", use_container_width=True, key="generate_corrector_v8"):
-            if len(corrections) != len(infos):
-                st.error("Falta asignar la corrección a una o más datas.")
-            else:
-                artifacts = []
-                corrected_payloads = []
-                native_payloads = []
-                polygon_payloads = []
-                per_file_calc = {}
-                base_coord_signature = []
-                for name, info in infos:
-                    e, n, h, rep, hc = corrections[name]
-                    corrected_b, polygon_b, calc = apply_correction(info, float(e), float(n), float(h))
-                    native_b, _ = native_updated(info)
-                    artifacts.append((
-                        name,
-                        native_b, native_updated_filename(name),
-                        corrected_b, corrected_filename(name),
-                        polygon_b, polygon_filename(name),
-                    ))
-                    native_payloads.append(native_b); corrected_payloads.append(corrected_b); polygon_payloads.append(polygon_b)
-                    base_coord_signature.append((round(float(e), 4), round(float(n), 4), round(float(h), 4)))
-                    per_file_calc[name] = calc
-                st.session_state["corrector_artifacts_v8"] = artifacts
-                st.session_state["corrector_calc_v8"] = per_file_calc
-                merged = None
-                if same_base and len({base_coord_signature}) == 1:
-                    try:
-                        merged_native, _ = merge_csv_payloads(native_payloads, require_same_base=True)
-                        merged_corrected, _ = merge_csv_payloads(corrected_payloads, require_same_base=True)
-                        merged_polygon, _ = merge_csv_payloads(polygon_payloads, require_same_base=True)
-                        merged = (merged_native, merged_corrected, merged_polygon, None)
-                    except Exception as exc:
-                        status(f"🟡 No se pudo crear el archivo unido: {exc}", "warn")
-                else:
-                    if same_base:
-                        status("🟡 Las correcciones de las datas no producen la misma base final; se mantienen separadas para no falsear el resultado.", "warn")
+                    if not reports:
+                        continue
+                    if len(reports) == 1:
+                        rname, rep = reports[0]
+                        st.caption(f"**{rname}** · Referencia: **{rep.reference_name or '—'}** · Móvil: **{rep.mobile_name or '—'}**")
                     else:
-                        status("🟡 La unión está deshabilitada porque las bases son diferentes.", "warn")
-                st.session_state["corrector_merged_v8"] = merged
-                st.success("✅ Procesamiento terminado. Las descargas quedan visibles y no desaparecen al hacer clic.")
+                        options = ["— Seleccionar informe —"] + [f"{rname} · {r.mobile_name or 'Móvil'}" for rname, r in reports]
+                        choice = st.selectbox(f"Informe de {name}", options, key=f"report_for_{idx}_v8")
+                        if choice == options[0]:
+                            continue
+                        rname, rep = reports[options.index(choice) - 1]
+                    selected_reports[name] = (rname, rep)
+                    if rep.mobile_e is None or rep.mobile_n is None:
+                        st.error(f"{name}: el informe no contiene coordenadas móviles.")
+                        continue
+                    hmode = st.selectbox(
+                        "Altura de destino", ["Automática", "Ortométrica", "Elipsoidal WGS84"],
+                        key=f"height_mode_{idx}_v8", help="Comprueba la altura ortométrica y elipsoidal."
+                    )
+                    try:
+                        chosen = choose_height(info.base_original_h, rep, hmode)
+                        corrections[name] = (rep.mobile_e, rep.mobile_n, chosen["selected_h"], rep, chosen)
+                    except Exception as exc:
+                        st.error(f"Altura de {name}: {exc}")
+            else:
+                for idx, (name, info) in enumerate(infos):
+                    if len(infos) > 1:
+                        st.caption(name)
+                    e1, n1, h1 = st.columns(3, gap="small")
+                    val_e = e1.number_input("Este (m)", value=float(info.base_original_e), format="%.4f", key=f"man_e_{idx}_v1062")
+                    val_n = n1.number_input("Norte (m)", value=float(info.base_original_n), format="%.4f", key=f"man_n_{idx}_v1062")
+                    val_h = h1.number_input("Altura (m)", value=float(info.base_original_h), format="%.4f", key=f"man_h_{idx}_v1062")
+                    corrections[name] = (val_e, val_n, val_h, None, None)
+                if reports:
+                    st.caption("El PDF permanecerá adjunto; la corrección usará las coordenadas manuales.")
 
-        # Persistent downloads
-        if st.session_state.get("corrector_artifacts_v8"):
-            st.markdown('<div class="download-head">📥 Descargas por archivo (respetando la plantilla maestra)</div>', unsafe_allow_html=True)
-            for idx, item in enumerate(st.session_state["corrector_artifacts_v8"]):
-                name, native_b, native_name, corrected_b, corrected_name, polygon_b, polygon_name = item
-                with st.expander(f"{name}", expanded=len(st.session_state["corrector_artifacts_v8"]) == 1):
-                    d1, d2, d3 = st.columns(3)
-                    d1.download_button("⬇️ NATIVA ACTUALIZADA", native_b, file_name=native_name, mime="text/csv", use_container_width=True, on_click="ignore", key=f"dn_v8_{idx}")
-                    d2.download_button("⬇️ CORREGIDA", corrected_b, file_name=corrected_name, mime="text/csv", use_container_width=True, on_click="ignore", key=f"dc_v8_{idx}")
-                    d3.download_button("⬇️ POLÍGONO", polygon_b, file_name=polygon_name, mime="text/csv", use_container_width=True, on_click="ignore", key=f"dp_v8_{idx}")
-                    calc = st.session_state.get("corrector_calc_v8", {}).get(name, {})
-                    if calc:
-                        c1, c2, c3 = st.columns(3)
-                        c1.metric("ΔE", f"{calc['delta_e']:+.4f} m")
-                        c2.metric("ΔN", f"{calc['delta_n']:+.4f} m")
-                        c3.metric("ΔH", f"{calc['delta_h']:+.4f} m")
-            merged = st.session_state.get("corrector_merged_v8")
-            if merged:
-                st.markdown('<div class="download-head">📦 Descargas unidas · plantilla maestra</div>', unsafe_allow_html=True)
-                mb1, mb2, mb3 = st.columns(3)
-                mb1.download_button("⬇️ NATIVA ACTUALIZADA UNIDA", merged[0], file_name="CONPLANOS_NATIVA_ACTUALIZADA_UNIDA.csv", mime="text/csv", use_container_width=True, on_click="ignore", key="merged_native_v8")
-                mb2.download_button("⬇️ CORREGIDA UNIDA", merged[1], file_name="CONPLANOS_CORREGIDA_UNIDA.csv", mime="text/csv", use_container_width=True, on_click="ignore", key="merged_corr_v8")
-                mb3.download_button("⬇️ POLÍGONO UNIDO", merged[2], file_name="CONPLANOS_POLIGONO_UNIDO.csv", mime="text/csv", use_container_width=True, on_click="ignore", key="merged_poly_v8")
-            if st.button("🧹 Limpiar resultados de descarga", key="clear_corr_v8"):
-                for k in ["corrector_artifacts_v8", "corrector_calc_v8", "corrector_merged_v8"]:
+            import hashlib as _hashlib
+            input_signature = (
+                tuple((f.name, _hashlib.sha256(f.getvalue()).hexdigest()) for f in (native_uploads or [])),
+                tuple((f.name, _hashlib.sha256(f.getvalue()).hexdigest()) for f in (pdfs or [])),
+                mode,
+                tuple((k, round(float(v[0]), 5), round(float(v[1]), 5), round(float(v[2]), 5)) for k, v in corrections.items()),
+                tuple((k, v[0]) for k, v in selected_reports.items()),
+            )
+            if st.session_state.get("corrector_signature_v1062") != input_signature:
+                for k in ("corrector_artifacts_v8", "corrector_calc_v8", "corrector_merged_v8"):
                     st.session_state.pop(k, None)
-                st.rerun()
+                st.session_state["corrector_signature_v1062"] = input_signature
+
+            st.markdown('<div class="gnss-label">04 · GENERAR Y DESCARGAR</div>', unsafe_allow_html=True)
+            if st.button("✓ GENERAR CORRECCIÓN", type="primary", use_container_width=True,
+                         disabled=len(corrections) != len(infos), key="generate_corrector_v8"):
+                try:
+                    artifacts, native_list, corrected_list, polygon_list, signatures = [], [], [], [], []
+                    calcs = {}
+                    for name, info in infos:
+                        e, n, h, _, _ = corrections[name]
+                        out, polygon, calc = apply_correction(info, float(e), float(n), float(h))
+                        native, _ = native_updated(info)
+                        artifacts.append((name, native, native_updated_filename(name), out, corrected_filename(name),
+                                          polygon, polygon_filename(name)))
+                        native_list.append(native); corrected_list.append(out); polygon_list.append(polygon)
+                        signatures.append((round(float(e), 4), round(float(n), 4), round(float(h), 4)))
+                        calcs[name] = calc
+                    joined = None
+                    if len(infos) > 1 and same_base and len(set(signatures)) == 1:
+                        try:
+                            j_native, _ = merge_csv_payloads(native_list, require_same_base=True)
+                            j_corrected, _ = merge_csv_payloads(corrected_list, require_same_base=True)
+                            j_polygon, _ = merge_csv_payloads(polygon_list, require_same_base=True)
+                            joined = (j_native, j_corrected, j_polygon, None)
+                        except Exception as exc:
+                            st.warning(f"Unión no disponible: {exc}. Descarga los archivos individuales.")
+                    st.session_state["corrector_artifacts_v8"] = artifacts
+                    st.session_state["corrector_calc_v8"] = calcs
+                    st.session_state["corrector_merged_v8"] = joined
+                    st.success("Corrección preparada. Las descargas permanecen visibles.")
+                except Exception as exc:
+                    st.error(f"Error en la generación: {type(exc).__name__}: {exc}")
+
+            if st.session_state.get("corrector_artifacts_v8"):
+                st.markdown('<div class="gnss-label">ARCHIVOS LISTOS</div>', unsafe_allow_html=True)
+                for idx, item in enumerate(st.session_state["corrector_artifacts_v8"]):
+                    name, nb, nf, cb, cf, pb, pf = item
+                    if len(infos) > 1:
+                        st.caption(name)
+                    dn, dc = st.columns(2, gap="small")
+                    dn.download_button("↓ NATIVA ACTUALIZADA", nb, file_name=nf, mime="text/csv",
+                                       use_container_width=True, on_click="ignore", key=f"dn_v8_{idx}")
+                    dc.download_button("↓ CORREGIDA", cb, file_name=cf, mime="text/csv",
+                                       use_container_width=True, on_click="ignore", key=f"dc_v8_{idx}")
+                    with st.expander("Polígono y desplazamientos", expanded=False):
+                        st.download_button("↓ POLÍGONO", pb, file_name=pf, mime="text/csv",
+                                           on_click="ignore", key=f"dp_v8_{idx}")
+                        c = st.session_state["corrector_calc_v8"].get(name, {})
+                        if c:
+                            st.caption(f"ΔE **{c['delta_e']:+.4f} m** · ΔN **{c['delta_n']:+.4f} m** · ΔH **{c['delta_h']:+.4f} m**")
+                joined = st.session_state.get("corrector_merged_v8")
+                if joined:
+                    with st.expander("Descargas unidas", expanded=False):
+                        c1, c2, c3 = st.columns(3)
+                        c1.download_button("↓ NATIVA UNIDA", joined[0], file_name="CONPLANOS_NATIVA_ACTUALIZADA_UNIDA.csv",
+                                           mime="text/csv", on_click="ignore", key="merged_native_v8")
+                        c2.download_button("↓ CORREGIDA UNIDA", joined[1], file_name="CONPLANOS_CORREGIDA_UNIDA.csv",
+                                           mime="text/csv", on_click="ignore", key="merged_corr_v8")
+                        c3.download_button("↓ POLÍGONO UNIDO", joined[2], file_name="CONPLANOS_POLIGONO_UNIDO.csv",
+                                           mime="text/csv", on_click="ignore", key="merged_poly_v8")
+
+    with right:
+        import html as _html
+        def esc(v):
+            return _html.escape(str(v if v is not None and v != "" else "—"))
+        def row(k,v):
+            return '<div class="gnss-row"><span>'+esc(k)+'</span><strong>'+esc(v)+'</strong></div>'
+        def stat(k,v):
+            return '<div class="gnss-stat"><small>'+esc(k)+'</small><strong>'+esc(v)+'</strong></div>'
+        def trip(items):
+            return '<div class="gnss-triple">'+''.join(stat(k,v) for k,v in items)+'</div>'
+        def head(t):
+            return '<div class="gnss-h">'+esc(t)+'</div>'
+        p = head("RESUMEN TÉCNICO · CONPLANOS")
+        if not infos:
+            p += '<p class="gnss-foot">Sube los archivos para visualizar tiempo de observación, línea base, coordenadas y calidad.</p>'
+        else:
+            name, info = infos[0]
+            p += '<div class="gnss-file">'+esc(name)+'</div>'
+            p += trip([("REGISTROS",len(info.rows)), ("FIX",len(info.fixed_points)), ("NO FIX",len(info.non_fixed_points))])
+            p += row("Plantilla",f"{len(info.fieldnames)} columnas") + row("Base RTK",info.base_name)
+            p += head("BASE NATIVA · UTM") + trip([
+                ("ESTE",f"{info.base_original_e:.4f}"), ("NORTE",f"{info.base_original_n:.4f}"),
+                ("H",f"{info.base_original_h:.4f} m")])
+            report_file, rep = selected_reports.get(name, (None,None))
+            if rep is None and reports:
+                report_file, rep = reports[0]
+            if rep:
+                distance = rep.distance_m
+                dist_label = "Distancia geométrica"
+                if distance is None and all(v is not None for v in (rep.reference_e,rep.reference_n,rep.mobile_e,rep.mobile_n)):
+                    distance=math.hypot(rep.mobile_e-rep.reference_e,rep.mobile_n-rep.reference_n)
+                    dist_label="Distancia horizontal calculada"
+                p += head("PROCESAMIENTO · LÍNEA BASE")
+                p += row("Referencia",rep.reference_name or "—") + row("Punto móvil",rep.mobile_name or "—")
+                p += row("Tiempo estático",rep.solution_duration or rep.duration or "No indicado")
+                p += row(dist_label,f"{distance:.3f} m" if distance is not None else "No indicado")
+                p += row("Solución",rep.solution_type or rep.solution_state or "—")
+                p += row("Antena móvil",rep.mobile_antenna or "—")
+                p += head("PRECISIONES DEL PDF")
+                p += trip([("CQ 1D",f"{rep.cq1d_m:.4f} m" if rep.cq1d_m is not None else "—"),
+                           ("CQ 2D",f"{rep.cq2d_m:.4f} m" if rep.cq2d_m is not None else "—"),
+                           ("CQ 3D",f"{rep.cq3d_m:.4f} m" if rep.cq3d_m is not None else "—")])
+            q=csv_point_quality_summary(info)
+            def q_value(k):
+                low,high=q.get(k,(None,None))
+                return "—" if low is None else (f"{low:.3f}" if low==high else f"{low:.3f}–{high:.3f}")
+            p += head("CALIDAD DEL CSV") + trip([("PDOP",q_value("pdop")),
+                                                 ("HDOP",q_value("hdop")),
+                                                 ("RMS",q_value("rms_error"))])
+            if name in corrections:
+                e,n,h,_,_=corrections[name]
+                p+=head("COORDENADAS DE CORRECCIÓN · MÓVIL")
+                p+=trip([("ESTE",f"{e:.4f}"),("NORTE",f"{n:.4f}"),("H",f"{h:.4f} m")])
+                calc=st.session_state.get("corrector_calc_v8",{}).get(name)
+                if calc:
+                    p+=row("Δ E",f"{calc['delta_e']:+.4f} m")+row("Δ N",f"{calc['delta_n']:+.4f} m")+row("Δ H",f"{calc['delta_h']:+.4f} m")
+            p+='<p class="gnss-foot">Solo datos extraídos del CSV/PDF; «—» significa no reportado. Sin valores instrumentales inventados.</p>'
+        st.markdown('<div class="gnss-panel">'+p+'</div>',unsafe_allow_html=True)
+
 
 # ========================================================
 # Generador de data
