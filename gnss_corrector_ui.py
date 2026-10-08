@@ -27,6 +27,8 @@ from core import (
 )
 from cad_export import export_corrected_dxf
 
+UI_VERSION = "10.6.7"
+
 
 def _esc(value):
     return html.escape(str(value if value is not None and value != "" else "—"))
@@ -366,7 +368,7 @@ def _read_report_uploads(pdfs):
 
 def render_corrector():
     _show_styles()
-    st.markdown('<div class="cp-heading"><h2>Corrección GNSS</h2><span>CONPLANOS · RTK / ESTÁTICO · V10.6.6</span></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="cp-heading"><h2>Corrección GNSS</h2><span>CONPLANOS · RTK / ESTÁTICO · V{UI_VERSION}</span></div>', unsafe_allow_html=True)
 
     # 01. El resumen del CSV se coloca en su misma fila.
     source_left, source_right = st.columns([1.35, 1], gap="medium")
@@ -586,6 +588,7 @@ def render_corrector():
     # 03: resultado siempre ocupa el ancho completo para facilitar descargas.
     st.markdown('<div class="cp-tag">03 · GENERAR Y DESCARGAR</div>', unsafe_allow_html=True)
     signature = (
+        UI_VERSION,  # Invalidate persisted download payloads from previous releases.
         tuple((f.name, hashlib.sha256(f.getvalue()).hexdigest()) for f in (uploads or [])),
         tuple((f.name, hashlib.sha256(f.getvalue()).hexdigest()) for f in (pdfs or [])),
         mode,
