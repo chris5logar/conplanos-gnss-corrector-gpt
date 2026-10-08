@@ -14,7 +14,7 @@ import unicodedata
 
 
 OBSERVATION_VALUE = "60"
-HEIGHT_WARNING_M = 40.0
+HEIGHT_WARNING_M = 20.0
 
 
 @dataclass
@@ -47,6 +47,9 @@ class ReportInfo:
     cq3d_m: Optional[float] = None
     std_distance_m: Optional[float] = None
     m0_m: Optional[float] = None
+    std_x_m: Optional[float] = None
+    std_y_m: Optional[float] = None
+    std_z_m: Optional[float] = None
 
     solution_type: Optional[str] = None
     solution_state: Optional[str] = None
@@ -300,6 +303,18 @@ def parse_report_pdfs(pdf_items) -> ReportInfo:
     info.cq1d_m = _one_number(lines, "CQ 1D:")
     info.cq2d_m = _one_number(lines, "CQ 2D:")
     info.cq3d_m = _one_number(lines, "CQ 3D:")
+    # XYZ precisions are ONLY populated if explicitly labelled in the report.
+    def explicit_sigma(axis: str) -> Optional[float]:
+        pattern = (
+            rf"(?im)^\s*(?:desv\.\s*est\.\s*{axis}|desviaci[oó]n\s+est[aá]ndar\s+{axis}"
+            rf"|sigma\s*{axis}|std\s*{axis}|precisi[oó]n\s+{axis})\s*:\s*"
+            rf"([-+]?\d+(?:[.,]\d+)?)\s*(?:m)?\s*$"
+        )
+        match = re.search(pattern, text)
+        return float(match.group(1).replace(",", ".")) if match else None
+    info.std_x_m = explicit_sigma("X")
+    info.std_y_m = explicit_sigma("Y")
+    info.std_z_m = explicit_sigma("Z")
 
     info.solution_type = _first_nonempty_after(lines, "Tipo de Solución:")
     if not info.solution_type:
@@ -469,6 +484,56 @@ _COLUMN_ALIASES: dict[str, list[str]] = {
 }
 
 
+
+def gnss_solution_fixed(value: str | None) -> bool:
+    """Conservative check: unknown/float/blank is NOT an observed fixed solution."""
+    token = _header_key(value or "")
+    if not token or any(w in token.split() for w in ("float", "flotante", "single", "autonomo", "autonomo", "dgps")):
+        return False
+    words = set(token.split())
+    return bool(words & {"fijo", "fixed", "fix"})
+
+
+def csv_quality_alerts(csv_info: CSVInfo) -> dict:
+    """Quality diagnostics for mobile rows only; CSV header is line 1, base is line 2."""
+    alerts: list[dict[str, str | int]] = []
+    base_col = _col(csv_info, "base")
+    solution_col = _col(csv_info, "solution")
+    obs_col = _col(csv_info, "observation")
+    name_col = _col(csv_info, "name")
+    low_observations = 0
+    for index, point in enumerate(csv_info.rows[1:], start=3):
+        point_name = str(point.get(name_col, "") or f"Fila {index}") if name_col else f"Fila {index}"
+        if base_col:
+            base = str(point.get(base_col, "") or "").strip()
+            if base and base.casefold() != csv_info.base_name.casefold():
+                alerts.append({"kind": "base", "row": index, "point": point_name, "detail": base})
+            elif not base:
+                alerts.append({"kind": "base_missing", "row": index, "point": point_name, "detail": "Sin referencia"})
+        if solution_col:
+            state = str(point.get(solution_col, "") or "").strip()
+            if not gnss_solution_fixed(state):
+                alerts.append({"kind": "solution", "row": index, "point": point_name, "detail": state or "Sin dato"})
+        if obs_col:
+            raw = str(point.get(obs_col, "") or "").strip()
+            try:
+                count = float(raw.replace(",", "."))
+            except (ValueError, TypeError):
+                count = 0
+            if count < 60:
+                low_observations += 1
+    return {
+        "alerts": alerts,
+        "base_conflicts": [a for a in alerts if a["kind"] == "base"],
+        "missing_base": [a for a in alerts if a["kind"] == "base_missing"],
+        "non_fixed": [a for a in alerts if a["kind"] == "solution"],
+        "low_observations": low_observations,
+        "has_solution_column": bool(solution_col),
+        "has_base_column": bool(base_col),
+        "has_observation_column": bool(obs_col),
+    }
+
+
 def _resolve_columns(
     fieldnames: list[str],
     overrides: dict[str, str] | None = None,
@@ -611,7 +676,7 @@ def read_csv(raw_bytes: bytes, column_overrides: dict[str, str] | None = None) -
     for row in rows[1:]:
         point = (row.get(name_col) or "").strip()
         solution = (row.get(solution_col) or "").strip() if solution_col else ""
-        if solution and solution.casefold() in {"fijo", "fixed", "fix"}:
+        if gnss_solution_fixed(solution):
             fixed_points.append(point)
         elif solution_col:
             non_fixed_points.append((point, solution))
@@ -746,7 +811,16 @@ def _normalize_rows(rows: list[dict[str, str]], csv_info: CSVInfo, start_number:
         new = dict(row)
         _set(new, csv_info, "name", str(seq))
         _set(new, csv_info, "base", csv_info.base_name)
-        _set(new, csv_info, "observation", OBSERVATION_VALUE)
+        # Raise epochs below 60 but retain real observations >=60; base row is unchanged.
+        obs_col = _col(csv_info, "observation")
+        if obs_col:
+            raw = str(new.get(obs_col, "") or "").strip()
+            try:
+                count = float(raw.replace(",", "."))
+            except (TypeError, ValueError):
+                count = 0.0
+            if count < 60:
+                new[obs_col] = OBSERVATION_VALUE
         _set(new, csv_info, "method", "Topográfico")
         out.append(new)
         seq += 1
