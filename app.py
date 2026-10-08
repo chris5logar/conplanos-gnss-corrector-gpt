@@ -51,7 +51,7 @@ from certificate import (
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 LOGO_PATH = TEMPLATES_DIR / "logo_conplanos.png"
-VERSION = "10.4"
+VERSION = "10.6"
 
 st.set_page_config(
     page_title="CONPLANOS GNSS",
@@ -117,10 +117,13 @@ def status(text, kind="ok"):
 
 
 def code_summary(csv_info):
+    c_col = (csv_info.columns or {}).get("code")
+    if not c_col:
+        return "No identificado"
     counts = Counter(
-        (r.get("Código") or "").strip()
+        (r.get(c_col) or "").strip()
         for r in csv_info.rows[1:]
-        if (r.get("Código") or "").strip()
+        if (r.get(c_col) or "").strip()
     )
     return " · ".join(f"{c} ({n})" for c, n in counts.most_common(4)) or "No identificado"
 
@@ -128,13 +131,15 @@ def code_summary(csv_info):
 def show_help(tool):
     if tool == "Corrector GNSS":
         st.info(
-            "Corrige uno o varios CSV nativos. Usa el punto móvil del informe Leica, conserva una sola base al unir, "
-            "renumera los puntos desde 1 y fija Observación=60 y Método de encuesta=Topográfico."
+            "Corrige uno o varios CSV nativos usando el primer archivo como plantilla maestra. "
+            "Respeta exactos nombres de columnas, orden, codificación, delimitador y campos adicionales. "
+            "Aplica la traslación de coordenadas desde el punto móvil Leica o ingreso manual."
         )
     elif tool == "Generador de data":
         st.warning(
-            "Genera DATA DERIVADA. Para la altura usa una superficie TIN lineal dentro del área de puntos nativos y, "
-            "cuando el punto queda fuera de esa envolvente, usa IDW como respaldo. No sustituye una observación de campo."
+            "Genera DATA DERIVADA utilizando el primer CSV como plantilla maestra. "
+            "Las alturas estimadas se calculan mediante una red TIN lineal dentro de la envolvente "
+            "y mediante IDW como respaldo fuera de ella. No inventa ni altera métricas observadas."
         )
     elif tool == "Certificados":
         st.info(
@@ -266,6 +271,44 @@ def external_record_to_map(r):
     }
 
 
+def prompt_manual_column_mapping(file_bytes: bytes, filename: str, key_prefix: str) -> dict[str, str] | None:
+    """Displays an interactive column selector when critical columns are ambiguous or unmapped."""
+    import csv, io
+    from core import _detect_encoding, _detect_delimiter
+    try:
+        encoding = _detect_encoding(file_bytes)
+        text = file_bytes.decode(encoding)
+        delimiter = _detect_delimiter(text)
+        reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=delimiter)
+        headers = list(reader.fieldnames or [])
+    except Exception:
+        headers = []
+
+    if not headers:
+        return None
+
+    st.warning(f"⚠️ Por favor confirma la asignación de columnas para **{filename}**:")
+    cols = st.columns(4)
+    overrides = {}
+
+    def candidate(label_sub):
+        for h in headers:
+            if label_sub.lower() in h.lower():
+                return h
+        return headers[0]
+
+    with cols[0]:
+        overrides["e"] = st.selectbox(f"Este (E) [{filename}]", headers, index=headers.index(candidate("este")) if candidate("este") in headers else 0, key=f"{key_prefix}_e")
+    with cols[1]:
+        overrides["n"] = st.selectbox(f"Norte (N) [{filename}]", headers, index=headers.index(candidate("norte")) if candidate("norte") in headers else min(1, len(headers)-1), key=f"{key_prefix}_n")
+    with cols[2]:
+        overrides["h"] = st.selectbox(f"Elevación (H) [{filename}]", headers, index=headers.index(candidate("ele")) if candidate("ele") in headers else min(2, len(headers)-1), key=f"{key_prefix}_h")
+    with cols[3]:
+        overrides["name"] = st.selectbox(f"Nombre [{filename}]", headers, index=headers.index(candidate("nom")) if candidate("nom") in headers else 0, key=f"{key_prefix}_name")
+
+    return overrides
+
+
 maybe_require_login()
 
 # ------------------ Sidebar ------------------
@@ -288,7 +331,9 @@ with st.sidebar:
 
     with st.expander("Versiones", expanded=False):
         st.markdown(
-            """
+            f"""
+            **V10.6 · Plantilla Maestra Nativa + mapeo semántico universal flexible + preservación de encabezados/orden original + soporte para cualquier fabricante (Trimble, CHC, Leica, South, Emlid, etc.).**
+
             **V10.5 · CSV nativo adaptable + Efemérides verificadas por disponibilidad real + prioridad Final → Rapid → Ultra-Rapid + modo oscuro.**
 
             **V9.1 · Corrección de arranque + placa oficial CONPLANOS como respaldo + código y año dinámicos.**
@@ -314,7 +359,7 @@ with st.sidebar:
     if auth_is_configured() and getattr(st.user, "is_logged_in", False):
         st.caption(f"👤 {getattr(st.user, 'name', '') or getattr(st.user, 'email', '')}")
         st.button("Cerrar sesión", on_click=st.logout, use_container_width=True)
-    st.caption("CONPLANOS GNSS · versión 10.3")
+    st.caption(f"CONPLANOS GNSS · versión {VERSION}")
     st.caption("🎨 Tema claro/oscuro: ⋮ → Settings → Theme")
 
 st.markdown('<div class="app-title">🛰️ CONPLANOS - Herramientas GNSS</div>', unsafe_allow_html=True)
@@ -331,7 +376,7 @@ if tool == "Corrector GNSS":
         native_uploads = st.file_uploader(
             "CSV nativos", type=["csv"], accept_multiple_files=True,
             label_visibility="collapsed", key="corrector_native_v8",
-            help="Puedes subir varios CSV. Para unirlos debe existir una sola base común."
+            help="El primer CSV actuará como plantilla maestra, conservando su estructura, delimitador y orden de columnas exactos."
         )
 
     if not native_uploads:
@@ -339,18 +384,41 @@ if tool == "Corrector GNSS":
     else:
         infos = []
         errors = []
-        for f in native_uploads:
+        for idx, f in enumerate(native_uploads):
+            raw = f.getvalue()
             try:
-                infos.append((f.name, read_csv(f.getvalue())))
+                # Try reading with auto-detected columns
+                overrides = st.session_state.get(f"corrector_col_override_{idx}")
+                csv_i = read_csv(raw, column_overrides=overrides)
+                infos.append((f.name, csv_i))
+            except ValueError as exc:
+                if "columnas críticas" in str(exc).lower():
+                    overrides = prompt_manual_column_mapping(raw, f.name, f"corr_map_{idx}")
+                    if overrides:
+                        st.session_state[f"corrector_col_override_{idx}"] = overrides
+                        try:
+                            csv_i = read_csv(raw, column_overrides=overrides)
+                            infos.append((f.name, csv_i))
+                        except Exception as ex2:
+                            errors.append(f"{f.name}: {ex2}")
+                else:
+                    errors.append(f"{f.name}: {exc}")
             except Exception as exc:
                 errors.append(f"{f.name}: {exc}")
+
         for e in errors:
             status(f"🔴 {e}", "bad")
         if not infos:
             st.stop()
 
         with right:
-            card("📦 Archivos nativos", "<br>".join(f"<b>{name}</b> · {len(info.rows)} filas · Base: {info.base_name}" for name, info in infos))
+            master_name = infos[0][0]
+            card(
+                "👑 Plantilla Maestra (Primer CSV)",
+                f"<b>{master_name}</b><br>"
+                f"Columnas: {len(infos[0][1].fieldnames)} · Filas: {len(infos[0][1].rows)}<br>"
+                f"Base: <b>{infos[0][1].base_name}</b>"
+            )
             base_names = [info.base_name for _, info in infos]
             same_base = len({x.casefold() for x in base_names}) == 1
             if same_base:
@@ -358,7 +426,7 @@ if tool == "Corrector GNSS":
             else:
                 status("🔴 Hay bases diferentes. Se permite procesar por separado, pero no unir en un solo CSV.", "bad")
 
-        with st.expander("Ver resumen de cada data", expanded=True):
+        with st.expander("Ver resumen de cada data nativa", expanded=True):
             for name, info in infos:
                 st.markdown(f"**{name}**")
                 c1, c2, c3, c4 = st.columns(4)
@@ -489,12 +557,12 @@ if tool == "Corrector GNSS":
 
         # Persistent downloads
         if st.session_state.get("corrector_artifacts_v8"):
-            st.markdown('<div class="download-head">📥 Descargas por archivo</div>', unsafe_allow_html=True)
+            st.markdown('<div class="download-head">📥 Descargas por archivo (respetando la plantilla maestra)</div>', unsafe_allow_html=True)
             for idx, item in enumerate(st.session_state["corrector_artifacts_v8"]):
                 name, native_b, native_name, corrected_b, corrected_name, polygon_b, polygon_name = item
                 with st.expander(f"{name}", expanded=len(st.session_state["corrector_artifacts_v8"]) == 1):
                     d1, d2, d3 = st.columns(3)
-                    d1.download_button("⬇️ Nativa ACTUALIZADA", native_b, file_name=native_name, mime="text/csv", use_container_width=True, on_click="ignore", key=f"dn_v8_{idx}")
+                    d1.download_button("⬇️ NATIVA ACTUALIZADA", native_b, file_name=native_name, mime="text/csv", use_container_width=True, on_click="ignore", key=f"dn_v8_{idx}")
                     d2.download_button("⬇️ CORREGIDA", corrected_b, file_name=corrected_name, mime="text/csv", use_container_width=True, on_click="ignore", key=f"dc_v8_{idx}")
                     d3.download_button("⬇️ POLÍGONO", polygon_b, file_name=polygon_name, mime="text/csv", use_container_width=True, on_click="ignore", key=f"dp_v8_{idx}")
                     calc = st.session_state.get("corrector_calc_v8", {}).get(name, {})
@@ -505,7 +573,7 @@ if tool == "Corrector GNSS":
                         c3.metric("ΔH", f"{calc['delta_h']:+.4f} m")
             merged = st.session_state.get("corrector_merged_v8")
             if merged:
-                st.markdown('<div class="download-head">📦 Descargas unidas · una sola base</div>', unsafe_allow_html=True)
+                st.markdown('<div class="download-head">📦 Descargas unidas · plantilla maestra</div>', unsafe_allow_html=True)
                 mb1, mb2, mb3 = st.columns(3)
                 mb1.download_button("⬇️ NATIVA ACTUALIZADA UNIDA", merged[0], file_name="CONPLANOS_NATIVA_ACTUALIZADA_UNIDA.csv", mime="text/csv", use_container_width=True, on_click="ignore", key="merged_native_v8")
                 mb2.download_button("⬇️ CORREGIDA UNIDA", merged[1], file_name="CONPLANOS_CORREGIDA_UNIDA.csv", mime="text/csv", use_container_width=True, on_click="ignore", key="merged_corr_v8")
@@ -526,22 +594,44 @@ elif tool == "Generador de data":
         gen_native_uploads = st.file_uploader(
             "CSV nativos matriz", type=["csv"], accept_multiple_files=True,
             label_visibility="collapsed", key="generator_native_v8",
+            help="El primer CSV actuará como plantilla maestra."
         )
     if not gen_native_uploads:
         st.info("Sube una o varias datas nativas para comenzar.")
     else:
         gen_infos = []
-        for f in gen_native_uploads:
+        for idx, f in enumerate(gen_native_uploads):
+            raw = f.getvalue()
             try:
-                gen_infos.append((f.name, read_csv(f.getvalue())))
+                overrides = st.session_state.get(f"gen_col_override_{idx}")
+                csv_i = read_csv(raw, column_overrides=overrides)
+                gen_infos.append((f.name, csv_i))
+            except ValueError as exc:
+                if "columnas críticas" in str(exc).lower():
+                    overrides = prompt_manual_column_mapping(raw, f.name, f"gen_map_{idx}")
+                    if overrides:
+                        st.session_state[f"gen_col_override_{idx}"] = overrides
+                        try:
+                            csv_i = read_csv(raw, column_overrides=overrides)
+                            gen_infos.append((f.name, csv_i))
+                        except Exception as ex2:
+                            status(f"🔴 {f.name}: {ex2}", "bad")
+                else:
+                    status(f"🔴 {f.name}: {exc}", "bad")
             except Exception as exc:
                 status(f"🔴 {f.name}: {exc}", "bad")
+
         if not gen_infos:
             st.stop()
         base_names = [i.base_name for _, i in gen_infos]
         same_base = len({x.casefold() for x in base_names}) == 1
         with right:
-            card("📋 Resumen de data matriz", "<br>".join(f"{n}: {len(i.rows)} filas · Base <b>{i.base_name}</b>" for n, i in gen_infos))
+            card(
+                "📋 Plantilla Maestra (Matriz)",
+                f"<b>{gen_infos[0][0]}</b><br>"
+                f"Bases: {len(gen_infos)} · Filas plantilla: {len(gen_infos[0][1].rows)}<br>"
+                f"Base principal: <b>{gen_infos[0][1].base_name}</b>"
+            )
             status("🟢 Base común lista para unir." if same_base else "🔴 Bases diferentes: no se generará un único proyecto.", "ok" if same_base else "bad")
         with st.expander("📍 Ver coordenadas de las bases", expanded=True):
             for n, i in gen_infos:
@@ -584,8 +674,8 @@ elif tool == "Generador de data":
             neighbors = t3.number_input("Vecinos IDW de respaldo", min_value=3, max_value=16, value=6, step=1, key="gen_neighbors_v8")
 
             with right:
-                card("🧩 Regla de generación", "🟢 Coincidente → conserva fila nativa.<br>🔵 Nueva → E/N del plano + H interpolada.<br>🛰️ Base → siempre primera y única.<br>🔢 Punto 1, 2, 3… → secuencia continua.<br>📡 Observación → 60.<br>📋 Método de encuesta → Topográfico.")
-                card("⛰️ Altura matemática", "Dentro de la envolvente de los puntos nativos se usa una red TIN (Delaunay) y interpolación lineal por triángulo. Fuera de esa envolvente se usa IDW como respaldo. Esto estima una superficie; no reemplaza una cota observada.")
+                card("🧩 Regla de generación", "🟢 Coincidente → conserva fila nativa.<br>🔵 Nueva → E/N del plano + H interpolada.<br>🛰️ Base → siempre primera y única.<br>🔢 Punto 1, 2, 3… → secuencia continua.<br>📡 Observación → 60 (si existe en la plantilla).<br>📋 Método de encuesta → Topográfico (si existe).")
+                card("⛰️ Naturaleza estimada de datos", "Dentro de la envolvente de los puntos nativos se usa una red TIN (Delaunay) e interpolación lineal. Fuera de esa envolvente se usa IDW como respaldo.<br><b>Atención:</b> Las alturas son estimadas matemáticamente. Los parámetros observados (PDOP, RMS, precisiones) se mantienen vacíos en puntos sintéticos.")
 
             st.markdown('<div class="step">PASO 3</div>', unsafe_allow_html=True)
             if st.button("🧩 GENERAR DATA DERIVADA", type="primary", use_container_width=True, key="generate_data_v8"):
@@ -600,10 +690,9 @@ elif tool == "Generador de data":
                             combined_info, valid_points,
                             match_tolerance_m=float(tolerance), idw_neighbors=int(neighbors)
                         )
-                        # Separate results by source file, plus one master union.
                         by_source = defaultdict(list)
                         for p in valid_points:
-                            by_source[p.source or "Coordenadas"] .append(p)
+                            by_source[p.source or "Coordenadas"].append(p)
                         separate = []
                         for src, pts in by_source.items():
                             b, s = generate_derived_data(combined_info, pts, match_tolerance_m=float(tolerance), idw_neighbors=int(neighbors))
@@ -972,8 +1061,6 @@ elif tool == "Efemérides precisas":
         results = {}
         days_to_check = [target + timedelta(days=delta) for delta in (-1, 0, 1)]
         with st.spinner("Verificando Final → Rapid → Ultra-Rapid en fuentes oficiales…"):
-            # The three requested days are independent. Run them concurrently
-            # so a slow archive for one day does not block the other two.
             with ThreadPoolExecutor(max_workers=3) as ex:
                 futures = {ex.submit(find_best_for_day, d, True): d for d in days_to_check}
                 for fut in as_completed(futures):
@@ -1071,6 +1158,6 @@ elif tool == "Efemérides precisas":
 
 # ------------------ Footer ------------------
 st.markdown(
-    '<div class="brand-footer">Creado por <b>Ing Chris</b> · <b>CONPLANOS</b> · 928 400 600 · Herramientas GNSS · v10.5</div>',
+    f'<div class="brand-footer">Creado por <b>Ing Chris</b> · <b>CONPLANOS</b> · 928 400 600 · Herramientas GNSS · v{VERSION}</div>',
     unsafe_allow_html=True,
 )
