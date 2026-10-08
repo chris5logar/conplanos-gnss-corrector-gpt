@@ -27,7 +27,7 @@ from core import (
 )
 from cad_export import export_corrected_dxf
 
-UI_VERSION = "10.6.7"
+UI_VERSION = "10.6.8"
 
 
 def _esc(value):
