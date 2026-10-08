@@ -207,16 +207,77 @@ def test_corrector_dashboard_regressions():
     import ast
     source = Path("app.py").read_text(encoding="utf-8")
     ast.parse(source)
-    assert 'VERSION = "10.6.2"' in source
+    assert 'VERSION = "10.6.3"' in source
     assert 'key="corrector_native_v8"' in source
     assert 'key="corrector_reports_v8"' in source
     assert 'len(set(signatures)) == 1' in source
     assert 'len({base_coord_signature})' not in source
-    assert '↓ NATIVA ACTUALIZADA' in source and '↓ CORREGIDA' in source
-    assert 'Tiempo estático' in source and 'Distancia geométrica' in source
-    assert 'CALIDAD DEL CSV' in source and 'PRECISIONES DEL PDF' in source
+    assert '↓ NATIVO' in source and '↓ CORREGIDO' in source and '↓ POLÍGONO DXF' in source
+    assert 'ESTÁTICO' in source and 'DISTANCIA' in source
+    assert 'RESUMEN · CSV NATIVO' in source and 'RESUMEN · INFORME Y CORRECCIÓN' in source
     assert 'Google Maps Embed' not in source
-    print("PASS 7: compact dashboard, dual upload, merge TypeError regression and downloads")
+    print("PASS 7: corporate two-row GNSS dashboard and CAD downloads")
+
+
+def test_cpimp_dxf_and_quality_controls():
+    """Test 8: CPimp 2.5.2 CAD layer conventions and quality without fabricating data."""
+    import io
+    import ezdxf
+    from core import csv_quality_alerts, gnss_solution_fixed, choose_height, ReportInfo
+    from cad_export import create_cpimp_dxf
+    fields = ["N/S de la base del GNSS", "Código", "Nombre", "Elevación",
+              "Norte", "Número de observación", "Este", "Solución"]
+    data = [
+        ["", "B", "BASE", "3690.0000", "8494500.0000", "1", "222000.0000", ""],
+        ["BASE", "LOTE", "10", "3691.0000", "8494502.0000", "5", "222002.0000", "Solución"],
+        ["OTRA", "LOTE", "11", "3692.0000", "8494504.0000", "90", "222003.0000", "Flotante"],
+        ["BASE", "LOTE", "12", "3693.0000", "8494501.0000", "0", "222004.0000", "Fijo (Fase)"],
+    ]
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(fields)
+    writer.writerows(data)
+    info = read_csv(out.getvalue().encode("utf-8-sig"))
+    issues = csv_quality_alerts(info)
+    assert len(issues["base_conflicts"]) == 1
+    assert issues["base_conflicts"][0]["row"] == 4
+    assert len(issues["non_fixed"]) == 1
+    assert issues["non_fixed"][0]["row"] == 4
+    assert issues["low_observations"] == 2
+    assert gnss_solution_fixed("Solución")
+    assert gnss_solution_fixed("Fijo (Fase)")
+    assert not gnss_solution_fixed("Flotante")
+    corrected, poly, result = apply_correction(info, 222000.5, 8494500.25, 3691.0)
+    original_native, _ = native_updated(info)
+    for payload in (original_native, corrected):
+        rows = read_csv(payload).rows
+        assert rows[0]["Número de observación"] == "1", "Base observation must not be changed"
+        assert [r["Número de observación"] for r in rows[1:]] == ["60", "90", "60"]
+    pdf = ReportInfo(mobile_h_ellip=3728.0, mobile_h_ortho=3691.2)
+    selected = choose_height(3690.0, pdf, "Automática")
+    assert selected["selected_type"] == "Ortométrica"
+    assert selected["selected_h"] == 3691.2
+    assert selected["diffs"]["Ortométrica"] < 20
+    pdf2 = ReportInfo(mobile_h_ellip=3760.0, mobile_h_ortho=3720.0)
+    selected2 = choose_height(3690.0, pdf2, "Automática")
+    assert any("20" in x for x in selected2["warnings"]), "warn at 20m threshold"
+
+    drawing = create_cpimp_dxf(info, result["corrected_rows"], "4", 0.04)
+    doc = ezdxf.read(io.StringIO(drawing.decode("utf-8")))
+    assert "Pun_TODOS" in doc.layers and "pol_TODOS" in doc.layers
+    assert int(doc.header["$PDMODE"]) == 36
+    assert float(doc.header["$PDSIZE"]) == 1.0
+    points = list(doc.modelspace().query("POINT"))
+    labels = list(doc.modelspace().query("TEXT"))
+    boundaries = list(doc.modelspace().query("LWPOLYLINE"))
+    assert len(points) == 3, "BASE must not enter CAD polygon"
+    assert len(labels) == 6
+    assert len(boundaries) == 1 and boundaries[0].closed
+    assert all(abs(x.dxf.height - 0.04) < 1e-9 for x in labels)
+    assert abs(points[0].dxf.location.x - 222002.5) < 1e-6, "CAD X must be East"
+    assert abs(points[0].dxf.location.y - 8494502.25) < 1e-6, "CAD Y must be North"
+    assert abs(points[0].dxf.location.z - 3692.0) < 1e-6, "CAD Z must be corrected height"
+    print("PASS 8: CPimp DXF E/N/H, text 0.04, boundary, base QC, epoch minimum and height selection")
 
 def main():
     test_column_order_and_preservation()
@@ -226,6 +287,7 @@ def main():
     test_synthetic_point_clearing_and_tin()
     test_streamlit_app_and_certificates()
     test_corrector_dashboard_regressions()
+    test_cpimp_dxf_and_quality_controls()
     print("\n✅ ALL TESTS PASSED SUCCESSFULLY!")
 
 

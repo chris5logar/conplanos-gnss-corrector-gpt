@@ -14,3 +14,4 @@ Authlib==1.8.0
 google-api-python-client==2.201.0
 tzdata==2026.5
 
+ezdxf>=1.4,<2
