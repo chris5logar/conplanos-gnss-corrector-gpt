@@ -10,7 +10,6 @@ import re
 import tempfile
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 from core import (
     apply_correction,
@@ -28,6 +27,24 @@ from core import (
     read_csv,
     zip_artifacts,
 )
+# Streamlit reruns may reuse a cached core module from a previous deploy.
+# Recover once if the loaded module predates the flexible CSV reader.
+import inspect as _inspect
+import importlib as _importlib
+import core as _gnss_core
+if "column_overrides" not in _inspect.signature(_gnss_core.read_csv).parameters:
+    _gnss_core = _importlib.reload(_gnss_core)
+    for _symbol in (
+        "apply_correction", "choose_height", "csv_point_quality_summary",
+        "corrected_filename", "extract_coordinate_sources",
+        "generated_data_filename", "generate_derived_data",
+        "merge_csv_payloads", "native_updated", "native_updated_filename",
+        "parse_report_pdfs", "polygon_filename", "read_csv", "zip_artifacts",
+    ):
+        globals()[_symbol] = getattr(_gnss_core, _symbol)
+    if "column_overrides" not in _inspect.signature(read_csv).parameters:
+        raise RuntimeError("No se cargó la versión actual de core.py. Reinicia la app en Streamlit Cloud.")
+
 from ephemeris import find_best_for_day, now_lima, now_utc, today_lima
 from drive import configured as drive_configured, upload_bytes as drive_upload_bytes
 from history import (
@@ -51,7 +68,7 @@ from certificate import (
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 LOGO_PATH = TEMPLATES_DIR / "logo_conplanos.png"
-VERSION = "10.6"
+VERSION = "10.6.1"
 
 st.set_page_config(
     page_title="CONPLANOS GNSS",
@@ -185,26 +202,6 @@ def maybe_require_login():
             st.stop()
 
 
-def google_maps_url(lat: float, lon: float) -> str:
-    return f"https://www.google.com/maps/search/?api=1&query={lat:.8f}%2C{lon:.8f}"
-
-
-def google_maps_view_url(lat: float, lon: float, zoom: int = 17) -> str:
-    return f"https://www.google.com/maps/@?api=1&map_action=map&center={lat:.8f}%2C{lon:.8f}&zoom={zoom}"
-
-
-def show_google_embed(lat: float, lon: float, zoom: int = 15):
-    try:
-        key = st.secrets.get("GOOGLE_MAPS_EMBED_API_KEY", "")
-    except Exception:
-        key = ""
-    if not key:
-        return
-    url = f"https://www.google.com/maps/embed/v1/view?key={key}&center={lat:.8f}%2C{lon:.8f}&zoom={zoom}"
-    html = f"<iframe src=\"{url}\" width=\"100%\" height=\"430\" style=\"border:0;border-radius:12px\" loading=\"lazy\" allowfullscreen referrerpolicy=\"strict-origin-when-cross-origin\"></iframe>"
-    components.html(html, height=440, scrolling=False)
-
-
 def integration_status():
     """Compact status panel for external integrations."""
     items = [
@@ -212,11 +209,6 @@ def integration_status():
         ("Google Drive", drive_configured()),
         ("Login Google", auth_is_configured()),
     ]
-    try:
-        maps_key = bool(st.secrets.get("GOOGLE_MAPS_EMBED_API_KEY", ""))
-    except Exception:
-        maps_key = False
-    items.append(("Google Maps Embed", maps_key))
     cols = st.columns(len(items))
     for col, (label, ok) in zip(cols, items):
         with col:
@@ -338,7 +330,7 @@ with st.sidebar:
 
             **V9.1 · Corrección de arranque + placa oficial CONPLANOS como respaldo + código y año dinámicos.**
 
-            **V8 · Múltiples archivos + descargas persistentes + lectura inteligente E/N + TIN de alturas + visor WGS84/Google Maps + login Google.**
+            **V8 · Múltiples archivos + descargas persistentes + lectura inteligente E/N + TIN de alturas + visor WGS84 + login Google.**
 
             **V7 · Efemérides + historial Google Sheets + mapa.**
 
@@ -902,10 +894,8 @@ elif tool == "Certificados":
                     st.error(f"Revisa E, N y zona UTM: {exc}")
 
         with search_right:
-            st.markdown("**🔎 Buscar lugar**")
-            place = st.text_input("Lugar o referencia", placeholder="Cusco, Sacsayhuamán, etc.", key="map_place_v10")
-            if place:
-                st.link_button("🌐 Abrir búsqueda en Google Maps", f"https://www.google.com/maps/search/?api=1&query={place.replace(' ', '+')}", use_container_width=True)
+            st.markdown("**📍 Historial geodésico**")
+            st.caption("Usa las coordenadas UTM para buscar puntos dentro del visor de CONPLANOS.")
             if history_configured():
                 st.success(f"☁️ Historial permanente conectado · {len(cert_records)} certificados · {len(ext_records)} puntos externos")
             else:
@@ -918,11 +908,6 @@ elif tool == "Certificados":
             status(f"📍 <b>{nearest.get('etiqueta','Punto')}</b> es el punto más cercano · distancia horizontal aproximada: <b>{dist:.2f} m</b>.", "ok")
             u = st.session_state.get("map_target_utm_v10", {})
             st.caption(f"Objetivo UTM WGS84: E {u.get('e','—'):.4f} · N {u.get('n','—'):.4f} · Zona {u.get('zone','—')} {u.get('hemi','')}")
-            g1, g2, g3 = st.columns(3)
-            g1.link_button("🌐 Objetivo en Google Maps", google_maps_url(*target_wgs), use_container_width=True)
-            g2.link_button("📍 Punto más cercano", google_maps_url(nearest['lat'], nearest['lon']), use_container_width=True)
-            g3.link_button("🗺️ Mapa centrado", google_maps_view_url(nearest['lat'], nearest['lon'], zoom=17), use_container_width=True)
-            show_google_embed(nearest['lat'], nearest['lon'], zoom=17)
 
         # ---------------- Register external points ----------------
         with st.expander("📌 Registrar otros puntos geodésicos desde documentos", expanded=False):
@@ -1042,7 +1027,6 @@ elif tool == "Certificados":
                     card("Ficha del certificado", f"Código: <b>{selected.get('codigo','—')}</b><br>Solicitante: {selected.get('solicitante','—')}<br>N: {selected.get('norte','—')} m · E: {selected.get('este','—')} m<br>Zona: {selected.get('zona','—')}<br>H elipsoidal: {selected.get('alt_ellipsoidal','—')} m<br>Estación: {selected.get('estacion_gnss','—')}<br>Fecha posición: {selected.get('fecha_posicion','—')}")
                 else:
                     card("Ficha del punto externo", f"Código: <b>{selected.get('codigo','—')}</b><br>Fuente: {selected.get('fuente','—')}<br>N: {selected.get('norte','—')} m · E: {selected.get('este','—')} m<br>Zona: {selected.get('zona','—')}<br>Observación: {selected.get('observacion','—')}")
-                st.link_button("🌐 Abrir seleccionado en Google Maps", google_maps_url(float(selected['lat']), float(selected['lon'])), use_container_width=True)
 
 # ========================================================
 # Efemérides
