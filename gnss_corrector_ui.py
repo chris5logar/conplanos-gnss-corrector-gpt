@@ -324,7 +324,7 @@ def _report_coordinate_card(report, kind: str) -> str:
                 + '"><span>' + _esc(label) + '</span><strong>'
                 + _esc(value) + '</strong></div>')
 
-    label = "PUNTO GEODÉSICO ELABORADO" if is_mobile else "ERP · ESTACIÓN DE REFERENCIA"
+    label = "PUNTO GEODÉSICO ELABORADO" if is_mobile else "ERP · ESTACIÓN DE RASTREO PERMANENTE"
     css_class = "cp-geo-card cp-geo-card--mobile" if is_mobile else "cp-geo-card cp-geo-card--reference"
     content = (
         '<article class="' + css_class + '">'
@@ -433,7 +433,7 @@ def render_corrector():
     mode = "PDF"
     reports = []
     with pdf_left:
-        st.markdown('<div class="cp-tag">02 · PROCESAMIENTO GNSS DEL PUNTO GEODÉSICO · COORDENADAS CORREGIDAS</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cp-tag">02 · PROCESAMIENTO DEL PUNTO GEODÉSICO GNSS</div>', unsafe_allow_html=True)
         st.caption("Carga el informe Leica del punto geodésico procesado o introduce sus coordenadas corregidas.")
         pdfs = st.file_uploader("Informes Leica", type=["pdf"], accept_multiple_files=True,
                                 label_visibility="collapsed", key="corrector_reports_v8")
@@ -673,7 +673,7 @@ def render_corrector():
         d1, d2 = st.columns([1, 2], gap="small")
         with d1:
             st.download_button("↓ TODO EN ZIP + ORIGINALES + AUDITORÍA", all_zip,
-                               file_name="CONPLANOS_CORRECCION_GNSS_COMPLETA.zip",
+                               file_name=(_original_project_name(infos[0][0]) + " RTK completo.zip" if len(infos) == 1 else "CONPLANOS RTK completo.zip"),
                                mime="application/zip", use_container_width=True,
                                on_click="ignore", key="cp_zip_v1063")
         if combined:
