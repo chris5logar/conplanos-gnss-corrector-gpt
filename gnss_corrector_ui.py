@@ -6,6 +6,8 @@ import hashlib
 import html
 import io
 import math
+import re
+from pathlib import Path
 import unicodedata
 
 import streamlit as st
@@ -115,6 +117,16 @@ border-bottom:1px solid rgba(111,127,135,.18);padding-bottom:.26rem;margin-botto
 .cp-coordinate-item strong{font-size:.75rem;font-weight:850;text-align:right;overflow-wrap:anywhere;line-height:1.34}
 .cp-coordinate-item--emphasis{background:rgba(15,133,122,.045);border-radius:5px}
 .cp-geo-card--mobile .cp-coordinate-item--emphasis strong{font-size:.81rem}
+.cp-tile--baseline{border:1px solid transparent}
+.cp-tile--ok{border-color:rgba(14,126,96,.35);background:rgba(27,151,109,.08)}
+.cp-tile--caution{border-color:rgba(209,149,31,.57);background:rgba(228,168,48,.16)}
+.cp-tile--danger{border-color:rgba(199,50,50,.7);background:rgba(215,50,50,.12)}
+.cp-tile--danger b{color:#d43c3c;font-weight:900}
+.cp-tile--caution b{color:#9c6700}
+.cp-geo-grid{grid-template-columns:1fr;gap:.45rem}
+.cp-geo-card{padding:.5rem .67rem .44rem}
+.cp-coordinate-stack{gap:.05rem}
+.cp-geo-card--mobile{border-width:2px}
 @media(max-width:660px){.cp-geo-grid{grid-template-columns:1fr}}
 
 .cp-geo-note{font-size:.6rem;line-height:1.35;opacity:.68;margin:.2rem 0 .4rem}
@@ -221,6 +233,53 @@ def _lat_lon(e, n, zone, hemisphere):
     return None
 
 
+
+
+
+def _original_project_name(filename: str) -> str:
+    """Remove previous processing suffixes, preserving the project's actual name."""
+    text = Path(filename.replace(chr(92), "/")).stem.strip()
+    suffix = re.compile(
+        r"(?i)[\\s_.-]+(?:sin[\\s_-]*corr(?:egir|eccion|ección)?|"
+        r"nativ[oa]|actualizad[oa]|corregid[oa]|pol[ií]gono|rtk|cpimp)$"
+    )
+    for _ in range(12):
+        cleaned = suffix.sub("", text).strip(" ._-")
+        if cleaned == text:
+            break
+        text = cleaned
+    return text or Path(filename).stem.strip() or "CONPLANOS"
+
+
+def _correction_filenames(filename: str) -> tuple[str, str, str, str]:
+    base = _original_project_name(filename)
+    return (
+        f"{base} RTK nativo.csv",
+        f"{base} RTK corregido.csv",
+        f"{base} Polígono corregido.csv",
+        f"{base} Polígono corregido.dxf",
+    )
+
+
+def _baseline_distance_status(distance_m: float | None):
+    """Advisory review thresholds, not a universal engineering restriction."""
+    if distance_m is None:
+        return "—", "unknown"
+    try:
+        km = float(distance_m) / 1000.0
+    except (TypeError, ValueError):
+        return "—", "unknown"
+    if not math.isfinite(km) or km < 0:
+        return "—", "unknown"
+    return f"{km:.3f} km", ("danger" if km > 100 else "caution" if km > 80 else "ok")
+
+
+def _baseline_tile(distance_m):
+    value, level = _baseline_distance_status(distance_m)
+    return (
+        '<div class="cp-tile cp-tile--baseline cp-tile--' + level +
+        '"><small>DISTANCIA ERP–PUNTO</small><b>' + _esc(value) + '</b></div>'
+    )
 
 
 def _report_coordinate_card(report, kind: str) -> str:
