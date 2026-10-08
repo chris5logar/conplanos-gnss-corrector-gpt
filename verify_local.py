@@ -128,7 +128,7 @@ def test_multiple_csv_merging_with_master_template():
     assert merged_info.fieldnames == master_fields, "Merged output must use Master CSV header schema"
     assert len(merged_info.rows) == 3  # Base + P1 + P2
     assert merged_info.rows[2]["Nombre"] == "2"
-    assert merged_info.rows[2]["Observación"] == "60"
+    assert merged_info.rows[2]["Observación"] == "", "No fabricar observaciones ausentes del segundo equipo"
     assert merged_info.rows[2]["Método"] == "Topográfico"
 
     print("PASS 4: Multi-CSV merging with Master CSV template")
