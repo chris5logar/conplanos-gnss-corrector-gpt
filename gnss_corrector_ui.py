@@ -293,15 +293,15 @@ def _report_coordinate_card(report, kind: str) -> str:
     if kind not in {"mobile", "reference"}:
         raise ValueError("Tipo de punto inválido.")
     is_mobile = kind == "mobile"
-    name = report.mobile_name if is_mobile else report.reference_name
-    e = report.mobile_e if is_mobile else report.reference_e
-    n = report.mobile_n if is_mobile else report.reference_n
-    h_ortho = report.mobile_h_ortho if is_mobile else report.reference_h_ortho
-    h_ellip = report.mobile_h_ellip if is_mobile else report.reference_h_ellip
-    lat_report = report.mobile_lat if is_mobile else report.reference_lat
-    lon_report = report.mobile_lon if is_mobile else report.reference_lon
-    hemi = (report.utm_hemisphere or "").upper()
-    zone = str(report.utm_zone) if report.utm_zone else None
+    name = getattr(report, "mobile_name", None) if is_mobile else getattr(report, "reference_name", None)
+    e = getattr(report, "mobile_e", None) if is_mobile else getattr(report, "reference_e", None)
+    n = getattr(report, "mobile_n", None) if is_mobile else getattr(report, "reference_n", None)
+    h_ortho = getattr(report, "mobile_h_ortho", None) if is_mobile else getattr(report, "reference_h_ortho", None)
+    h_ellip = getattr(report, "mobile_h_ellip", None) if is_mobile else getattr(report, "reference_h_ellip", None)
+    lat_report = getattr(report, "mobile_lat", None) if is_mobile else getattr(report, "reference_lat", None)
+    lon_report = getattr(report, "mobile_lon", None) if is_mobile else getattr(report, "reference_lon", None)
+    hemi = (getattr(report, "utm_hemisphere", None) or "").upper()
+    zone = str(getattr(report, "utm_zone", None)) if getattr(report, "utm_zone", None) else None
     if lat_report and lon_report:
         lat, lon = lat_report, lon_report
         source = "Geográficas extraídas del informe Leica"
@@ -502,9 +502,6 @@ def render_corrector():
         if not rep:
             st.markdown(_panel("RESUMEN DEL INFORME GNSS", '<p class="cp-footnote">Sube el informe Leica para identificar la ERP, el punto geodésico, duración y calidad.</p>'), unsafe_allow_html=True)
         else:
-            zone, hemi = rep.utm_zone, rep.utm_hemisphere or "S"
-            reference_geo = _lat_lon(rep.reference_e, rep.reference_n, zone, hemi)
-            mobile_geo = _lat_lon(rep.mobile_e, rep.mobile_n, zone, hemi)
             distance = rep.distance_m
             dist_caption = "Distancia geométrica"
             if distance is None and all(v is not None for v in (rep.reference_e, rep.reference_n, rep.mobile_e, rep.mobile_n)):
@@ -544,9 +541,9 @@ def render_corrector():
             body += _tiles([("CQ 1D", f"{rep.cq1d_m:.4f} m" if rep.cq1d_m is not None else "—"),
                             ("CQ 2D", f"{rep.cq2d_m:.4f} m" if rep.cq2d_m is not None else "—"),
                             ("CQ 3D", f"{rep.cq3d_m:.4f} m" if rep.cq3d_m is not None else "—")])
-            body += _tiles([("ERROR X", f"{rep.error_x_m:.4f} m" if rep.error_x_m is not None else "—"),
-                            ("ERROR Y", f"{rep.error_y_m:.4f} m" if rep.error_y_m is not None else "—"),
-                            ("ERROR Z", f"{rep.error_z_m:.4f} m" if rep.error_z_m is not None else "—")])
+            body += _tiles([("ERROR X", f"{getattr(rep, "error_x_m", None):.4f} m" if getattr(rep, "error_x_m", None) is not None else "—"),
+                            ("ERROR Y", f"{getattr(rep, "error_y_m", None):.4f} m" if getattr(rep, "error_y_m", None) is not None else "—"),
+                            ("ERROR Z", f"{getattr(rep, "error_z_m", None):.4f} m" if getattr(rep, "error_z_m", None) is not None else "—")])
             if name in corrections:
                 e, n, h, _, hc = corrections[name]
                 body += _section("ALTURA APLICADA Y AJUSTES DEL CSV")
