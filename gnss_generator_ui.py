@@ -23,7 +23,7 @@ from core import (
 )
 from gnss_corrector_ui import _esc, _line, _overrides, _panel, _section, _show_styles, _tiles
 
-UI_VERSION = "10.6.7"
+UI_VERSION = "10.6.8"
 
 
 def _generator_source(upload, index):
