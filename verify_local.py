@@ -208,8 +208,9 @@ def test_corrector_dashboard_regressions():
     source = Path("app.py").read_text(encoding="utf-8")
     ast.parse(source)
     assert 'VERSION = "10.6.3"' in source
-    assert 'key="corrector_native_v8"' in source
-    assert 'key="corrector_reports_v8"' in source
+    ui = Path("gnss_corrector_ui.py").read_text(encoding="utf-8")
+    assert 'key="corrector_native_v8"' in ui
+    assert 'key="corrector_reports_v8"' in ui
     assert 'from gnss_corrector_ui import render_corrector' in source
     assert 'len({base_coord_signature})' not in source
     ui = Path("gnss_corrector_ui.py").read_text(encoding="utf-8")
