@@ -488,10 +488,11 @@ _COLUMN_ALIASES: dict[str, list[str]] = {
 def gnss_solution_fixed(value: str | None) -> bool:
     """Conservative check: unknown/float/blank is NOT an observed fixed solution."""
     token = _header_key(value or "")
-    if not token or any(w in token.split() for w in ("float", "flotante", "single", "autonomo", "autonomo", "dgps")):
+    if not token or any(w in token.split() for w in ("float", "flotante", "single", "autonomo", "dgps", "sin")):
         return False
     words = set(token.split())
-    return bool(words & {"fijo", "fixed", "fix"})
+    # Some CHC/LandStar native files label a valid resolved observation "Solución".
+    return bool(words & {"fijo", "fixed", "fix", "solucion"})
 
 
 def csv_quality_alerts(csv_info: CSVInfo) -> dict:
