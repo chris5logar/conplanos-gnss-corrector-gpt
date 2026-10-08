@@ -69,6 +69,8 @@ class ReportInfo:
 
     reference_antenna_height_m: Optional[float] = None
     mobile_antenna_height_m: Optional[float] = None
+    reference_lat: Optional[str] = None
+    reference_lon: Optional[str] = None
     mobile_lat: Optional[str] = None
     mobile_lon: Optional[str] = None
     utm_zone: Optional[str] = None
@@ -386,21 +388,42 @@ def parse_report_pdfs(pdf_items) -> ReportInfo:
         info.reference_antenna_height_m = heights[0]
         info.mobile_antenna_height_m = heights[1]
 
-    def _second_line_after_label(label: str) -> Optional[str]:
+    def _coordinate_pair_after_label(label: str) -> tuple[Optional[str], Optional[str]]:
+        """First=reference, second=mobile, when both geographic values are reported.
+
+        Do not assign geographic coordinates if the PDF contains an incomplete or
+        unrecognizable block. UTM conversion in the UI is a separately marked fallback.
+        """
         label_norm = _clean_line(label).casefold()
         for i, line in enumerate(lines):
-            if _clean_line(line).casefold().startswith(label_norm):
-                vals = []
-                for candidate in lines[i + 1 : i + 5]:
-                    c = _clean_line(candidate)
-                    if c:
-                        vals.append(c)
-                    if len(vals) >= 2:
-                        return vals[1]
-        return None
+            current = _clean_line(line)
+            if not current.casefold().startswith(label_norm):
+                continue
+            values = []
+            suffix = current[len(_clean_line(label)):].strip()
+            candidates = ([suffix] if suffix else []) + lines[i + 1:i + 7]
+            for value in candidates:
+                candidate = _clean_line(value)
+                if not candidate:
+                    continue
+                # Next labelled field: do not include subsequent report data.
+                if re.match(r"^(longitud|latitud|altura|coordenada|distancia|fecha|hora)\b", candidate, re.I):
+                    break
+                looks_coordinate = (
+                    bool(re.search(r"\d", candidate))
+                    and (bool(re.search(r"[°º′″']", candidate))
+                         or bool(re.search(r"[NSEOWe]\s*$", candidate, re.I))
+                         or bool(re.fullmatch(r"[-+]?\d{1,3}(?:[.,]\d{1,12})?", candidate)))
+                )
+                if looks_coordinate:
+                    values.append(candidate)
+                if len(values) == 2:
+                    return values[0], values[1]
+            return None, None
+        return None, None
 
-    info.mobile_lat = _second_line_after_label("Latitud WGS84:")
-    info.mobile_lon = _second_line_after_label("Longitud WGS84:")
+    info.reference_lat, info.mobile_lat = _coordinate_pair_after_label("Latitud WGS84:")
+    info.reference_lon, info.mobile_lon = _coordinate_pair_after_label("Longitud WGS84:")
 
     m = re.search(r"WGS84_UTM_(\d{1,2})([NS])", text, re.I)
     if m:
