@@ -11,6 +11,16 @@ import tempfile
 
 import streamlit as st
 
+# The PDF reader's dataclass must be refreshed BEFORE importing core functions.
+# Streamlit reruns can keep an older core module after a GitHub deployment.
+import importlib as _gnss_importlib
+import ui_runtime as _gnss_runtime
+# The runtime loader may itself be cached from the previous deployment.
+if not hasattr(_gnss_runtime, "ensure_core_schema"):
+    _gnss_importlib.invalidate_caches()
+    _gnss_runtime = _gnss_importlib.reload(_gnss_runtime)
+_gnss_runtime.ensure_core_schema("10.6.8")
+
 from core import (
     apply_correction,
     choose_height,
@@ -68,7 +78,7 @@ from certificate import (
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 LOGO_PATH = TEMPLATES_DIR / "logo_conplanos.png"
-VERSION = "10.6.7"
+VERSION = "10.6.8"
 
 st.set_page_config(
     page_title="CONPLANOS GNSS",

@@ -13,6 +13,7 @@ import zipfile
 import unicodedata
 
 
+CORE_SCHEMA_VERSION = "10.6.8"  # Version of report and CSV dataclasses used by the UI.
 OBSERVATION_VALUE = "60"
 HEIGHT_WARNING_M = 20.0
 
