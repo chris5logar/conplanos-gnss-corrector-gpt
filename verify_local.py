@@ -207,7 +207,7 @@ def test_corrector_dashboard_regressions():
     import ast
     source = Path("app.py").read_text(encoding="utf-8")
     ast.parse(source)
-    assert 'VERSION = "10.6.7"' in source
+    assert 'VERSION = "10.6.8"' in source
     ui = Path("gnss_corrector_ui.py").read_text(encoding="utf-8")
     assert 'key="corrector_native_v8"' in ui
     assert 'key="corrector_reports_v8"' in ui
@@ -406,7 +406,7 @@ def test_download_naming_and_km_baseline_review():
 
 
 def test_streamlit_runtime_ui_module_refresh():
-    """Simulate a cached V10.6.3 screen after app.py deploys V10.6.7."""
+    """Simulate a cached V10.6.3 screen after app.py deploys V10.6.8."""
     import ast
     from ui_runtime import load_ui_module
     import gnss_corrector_ui as legacy_corrector
