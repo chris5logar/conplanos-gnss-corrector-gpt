@@ -68,7 +68,7 @@ from certificate import (
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 LOGO_PATH = TEMPLATES_DIR / "logo_conplanos.png"
-VERSION = "10.6.6"
+VERSION = "10.6.7"
 
 st.set_page_config(
     page_title="CONPLANOS GNSS",
@@ -379,16 +379,24 @@ if tool != "Corrector GNSS":
 # Corrector GNSS
 # ========================================================
 if tool == "Corrector GNSS":
-    from gnss_corrector_ui import render_corrector
-    render_corrector()
+    from ui_runtime import load_ui_module
+    try:
+        load_ui_module("gnss_corrector_ui", VERSION).render_corrector()
+    except RuntimeError as exc:
+        st.error(f"⚠️ Versión inconsistente de la interfaz: {exc}")
+        st.stop()
 
 
 # ========================================================
 # Generador de data
 # ========================================================
 elif tool == "Generador de data":
-    from gnss_generator_ui import render_generator
-    render_generator()
+    from ui_runtime import load_ui_module
+    try:
+        load_ui_module("gnss_generator_ui", VERSION).render_generator()
+    except RuntimeError as exc:
+        st.error(f"⚠️ Versión inconsistente de la interfaz: {exc}")
+        st.stop()
 
 # ========================================================
 # Certificados
